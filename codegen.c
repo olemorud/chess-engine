@@ -3,6 +3,102 @@
 #include <stdlib.h>
 #include <stdio.h>
 
+static bitboard bishop_attacks_from_index_slow(enum square_index sq, bitboard occ)
+{
+    const enum rank_index rank = index_to_rank(sq);
+    const enum file_index file = index_to_file(sq);
+
+    bitboard atk = 0ULL;
+
+    /* following loops assume rank and file types are unsigned, which relies on C23 enums */
+    _Static_assert(((enum rank_index)0) - ((enum rank_index)1) > ((enum rank_index)0));
+    _Static_assert(((enum file_index)0) - ((enum file_index)1) > ((enum file_index)0));
+
+    enum rank_index walk_rank;
+    enum file_index walk_file;
+    for (walk_rank = rank+1, walk_file = file+1;
+            walk_rank <= RANK_INDEX_8 && walk_file <= FILE_INDEX_H;
+            ++walk_rank, ++walk_file) {
+        const bitboard sq = SQ_MASK_FROM_RF(walk_rank, walk_file);
+        atk |= sq;
+        if (occ & sq) {
+            break;
+        }
+    }
+    for (walk_rank = rank+1, walk_file = file-1;
+            walk_rank <= RANK_INDEX_8 && walk_file <= FILE_INDEX_H;
+            ++walk_rank, --walk_file) {
+        const bitboard sq = SQ_MASK_FROM_RF(walk_rank, walk_file);
+        atk |= sq;
+        if (occ & sq) {
+            break;
+        }
+    }
+    for (walk_rank = rank-1, walk_file = file+1;
+            walk_rank <= RANK_INDEX_8 && walk_file <= FILE_INDEX_H;
+            --walk_rank, ++walk_file) {
+        const bitboard sq = SQ_MASK_FROM_RF(walk_rank, walk_file);
+        atk |= sq;
+        if (occ & sq) {
+            break;
+        }
+    }
+    for (walk_rank = rank-1, walk_file = file-1;
+            walk_rank <= RANK_INDEX_8 && walk_file <= FILE_INDEX_H;
+            --walk_rank, --walk_file) {
+        const bitboard sq = SQ_MASK_FROM_RF(walk_rank, walk_file);
+        atk |= sq;
+        if (occ & sq) {
+            break;
+        }
+    }
+    
+    return atk;
+}
+
+static bitboard rook_attacks_from_index_slow(enum square_index sq, bitboard occ)
+{
+    const enum rank_index rank = index_to_rank(sq);
+    const enum file_index file = index_to_file(sq);
+
+    bitboard atk = 0ULL;
+
+    /* following loops assume rank and file types are unsigned, which relies on C23 enums */
+    _Static_assert(((enum rank_index)0) - ((enum rank_index)1) > ((enum rank_index)0));
+    _Static_assert(((enum file_index)0) - ((enum file_index)1) > ((enum file_index)0));
+
+    for (enum rank_index walk_rank = rank+1; walk_rank <= RANK_INDEX_8; ++walk_rank) {
+        const bitboard sq = SQ_MASK_FROM_RF(walk_rank, file);
+        atk |= sq;
+        if (occ & sq) {
+            break;
+        }
+    }
+    for (enum rank_index walk_rank = rank-1; walk_rank <= RANK_INDEX_8; --walk_rank) {
+        const bitboard sq = SQ_MASK_FROM_RF(walk_rank, file);
+        atk |= sq;
+        if (occ & sq) {
+            break;
+        }
+    }
+    for (enum file_index walk_file = file+1; walk_file <= FILE_INDEX_H; ++walk_file) {
+        const bitboard sq = SQ_MASK_FROM_RF(rank, walk_file);
+        atk |= sq;
+        if (occ & sq) {
+            break;
+        }
+    }
+    for (enum file_index walk_file = file-1; walk_file <= FILE_INDEX_H; --walk_file) {
+        const bitboard sq = SQ_MASK_FROM_RF(rank, walk_file);
+        atk |= sq;
+        if (occ & sq) {
+            break;
+        }
+    }
+    
+    return atk;
+}
+
 /* gets the next number with the same bitcount, unless it overflows, in which
  * it returns the first number with popcount+1 */
 uint64_t next_magic(uint64_t seed) {
@@ -38,19 +134,19 @@ uint64_t rand64() {
 
 int main()
 {
-    struct magic rook_magics[SQUARE_INDEX_COUNT] = {0ULL};
-    bitboard rook_attacks[SQUARE_INDEX_COUNT][1<<12ULL] = {0};
+    struct magic rook_magics[SQ_INDEX_COUNT] = {0ULL};
+    bitboard rook_attacks[SQ_INDEX_COUNT][1<<12ULL] = {0};
 
     index rook_relevant_bits[12] = {0};
     size_t rook_relevant_bits_count = 0;
 
-    struct magic bishop_magics[SQUARE_INDEX_COUNT] = {0ULL};
-    bitboard bishop_attacks[SQUARE_INDEX_COUNT][1<<9ULL] = {0};
+    struct magic bishop_magics[SQ_INDEX_COUNT] = {0ULL};
+    bitboard bishop_attacks[SQ_INDEX_COUNT][1<<9ULL] = {0};
 
     index bishop_relevant_bits[9] = {0};
     size_t bishop_relevant_bits_count = 0;
 
-    for (enum square_index sq_index = SQUARE_INDEX_BEGIN; sq_index < SQUARE_INDEX_COUNT; ++sq_index) {
+    for (enum square_index sq_index = SQ_INDEX_BEGIN; sq_index < SQ_INDEX_COUNT; ++sq_index) {
         enum file_index file = index_to_file(sq_index);
         enum rank_index rank = index_to_rank(sq_index);
         fprintf(stderr, "%s ", square_index_display[sq_index]);
@@ -61,16 +157,15 @@ int main()
             /* generate attack mask */
             bitboard atk_mask = 0;
             {
-                atk_mask |= FILE_MASK(file) & ~(RANKMASK_1 | RANKMASK_8);
-                atk_mask |= RANK_MASK(rank) & ~(FILEMASK_A | FILEMASK_H);
-                atk_mask &= ~SQUARE_MASK_FROM_RF(rank, file);
+                atk_mask |= FILE_MASK(file) & ~(RANK_MASK_1 | RANK_MASK_8);
+                atk_mask |= RANK_MASK(rank) & ~(FILE_MASK_A | FILE_MASK_H);
+                atk_mask &= ~SQ_MASK_FROM_RF(rank, file);
 
                 /* populate relevant bits array */
                 rook_relevant_bits_count = 0;
                 bitboard x = atk_mask;
                 while (x) {
-                    const index lsb = bitboard_lsb(x) - 1;
-                    x &= ~(1ULL<<(lsb));
+                    const index lsb = bitboard_pop_lsb(&x);
                     rook_relevant_bits[rook_relevant_bits_count++] = lsb;
                 }
             }
@@ -117,16 +212,15 @@ int main()
             bitboard atk_mask = 0;
             {
                 atk_mask |= diagonals_from_index(sq_index);
-                atk_mask &= ~(RANKMASK_1 | RANKMASK_8);
-                atk_mask &= ~(FILEMASK_A | FILEMASK_H);
-                atk_mask &= ~SQUARE_MASK_FROM_RF(rank, file);
+                atk_mask &= ~(RANK_MASK_1 | RANK_MASK_8);
+                atk_mask &= ~(FILE_MASK_A | FILE_MASK_H);
+                atk_mask &= ~SQ_MASK_FROM_RF(rank, file);
 
                 /* populate relevant bits array */
                 bishop_relevant_bits_count = 0;
                 bitboard x = atk_mask;
                 while (x) {
-                    const index lsb = bitboard_lsb(x) - 1;
-                    x &= ~(1ULL<<(lsb));
+                    const index lsb = bitboard_pop_lsb(&x);
                     bishop_relevant_bits[bishop_relevant_bits_count++] = lsb;
                 }
             }
@@ -178,8 +272,8 @@ int main()
         }
 
         fprintf(f, "#pragma once\n");
-        fprintf(f, "static const struct magic mbb_rook[SQUARE_INDEX_COUNT] = {\n");
-        for (enum square_index i = SQUARE_INDEX_BEGIN; i < SQUARE_INDEX_COUNT; i++) {
+        fprintf(f, "static const struct magic mbb_rook[SQ_INDEX_COUNT] = {\n");
+        for (enum square_index i = SQ_INDEX_BEGIN; i < SQ_INDEX_COUNT; i++) {
             fprintf(f,
                  TAB "[%s] = (struct magic) {"
               NL TAB "    .magic = 0x%016"BITBOARD_FMT_X"ULL,"
@@ -194,8 +288,8 @@ int main()
 
         fprintf(f,"\n");
 
-        fprintf(f, "static const bitboard rook_attacks[SQUARE_INDEX_COUNT][1ULL<<12ULL] = {\n");
-        for (enum square_index sq = SQUARE_INDEX_BEGIN; sq < SQUARE_INDEX_COUNT; ++sq) {
+        fprintf(f, "static const bitboard rook_attacks[SQ_INDEX_COUNT][1ULL<<12ULL] = {\n");
+        for (enum square_index sq = SQ_INDEX_BEGIN; sq < SQ_INDEX_COUNT; ++sq) {
             fprintf(f, "[%s] = {\n", square_index_str[sq]);
             for (size_t i = 0; i < sizeof rook_attacks[sq] / sizeof *rook_attacks[sq]; i++) {
                 fprintf(f, "0x%016"BITBOARD_FMT_X"ULL, \n", rook_attacks[sq][i]);
@@ -215,8 +309,8 @@ int main()
         }
 
         fprintf(f, "\n");
-        fprintf(f, "static const struct magic mbb_bishop[SQUARE_INDEX_COUNT] = {\n");
-        for (enum square_index i = SQUARE_INDEX_BEGIN; i < SQUARE_INDEX_COUNT; i++) {
+        fprintf(f, "static const struct magic mbb_bishop[SQ_INDEX_COUNT] = {\n");
+        for (enum square_index i = SQ_INDEX_BEGIN; i < SQ_INDEX_COUNT; i++) {
             fprintf(f,
                  TAB "[%s] = (struct magic) {"
               NL TAB "    .magic = 0x%016"BITBOARD_FMT_X"ULL,"
@@ -231,8 +325,8 @@ int main()
 
         fprintf(f,"\n");
 
-        fprintf(f, "static const bitboard bishop_attacks[SQUARE_INDEX_COUNT][1ULL<<9ULL] = {\n");
-        for (enum square_index sq = SQUARE_INDEX_BEGIN; sq < SQUARE_INDEX_COUNT; ++sq) {
+        fprintf(f, "static const bitboard bishop_attacks[SQ_INDEX_COUNT][1ULL<<9ULL] = {\n");
+        for (enum square_index sq = SQ_INDEX_BEGIN; sq < SQ_INDEX_COUNT; ++sq) {
             fprintf(f, "[%s] = {\n", square_index_str[sq]);
             for (size_t i = 0; i < sizeof bishop_attacks[sq] / sizeof *bishop_attacks[sq]; i++) {
                 fprintf(f, "0x%016"BITBOARD_FMT_X"ULL, \n", bishop_attacks[sq][i]);

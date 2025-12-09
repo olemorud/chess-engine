@@ -1,4 +1,7 @@
 
+#define _XOPEN_SOURCE 500
+#include <unistd.h> /* usleep */
+
 #include "base.h"
 
 #include <stdio.h>
@@ -25,13 +28,13 @@ static void print_rook_test(const char *label,
 static void test_rooks()
 {
     {
-        const enum square_index sq = SQUARE_INDEX_A1;
-        const bitboard rook       = SQUARE_MASK_A1;
+        const enum square_index sq = SQ_INDEX_A1;
+        const bitboard rook       = SQ_MASK_A1;
         const bitboard all_occ    = rook;
         const bitboard own_occ    = rook;
 
         /* Expected: full rank 1 and file A, except A1 */
-        bitboard expected = (FILEMASK_A | RANKMASK_1) & ~SQUARE_MASK_A1;
+        bitboard expected = (FILE_MASK_A | RANK_MASK_1) & ~SQ_MASK_A1;
 
         print_rook_test("Test 1: Rook at A1, empty board", sq, all_occ, own_occ);
 
@@ -40,9 +43,9 @@ static void test_rooks()
     }
 
     {
-        const enum square_index sq = SQUARE_INDEX_A1;
-        const bitboard rook        = SQUARE_MASK_A1;
-        const bitboard own_block   = SQUARE_MASK_A2 | SQUARE_MASK_B1;
+        const enum square_index sq = SQ_INDEX_A1;
+        const bitboard rook        = SQ_MASK_A1;
+        const bitboard own_block   = SQ_MASK_A2 | SQ_MASK_B1;
         const bitboard all_occ     = rook | own_block;
         const bitboard own_occ     = all_occ;
 
@@ -56,9 +59,9 @@ static void test_rooks()
     }
 
     {
-        const enum square_index sq = SQUARE_INDEX_A1;
-        const bitboard rook        = SQUARE_MASK_A1;
-        const bitboard enemies     = SQUARE_MASK_A3 | SQUARE_MASK_C1;
+        const enum square_index sq = SQ_INDEX_A1;
+        const bitboard rook        = SQ_MASK_A1;
+        const bitboard enemies     = SQ_MASK_A3 | SQ_MASK_C1;
         const bitboard all_occ     = rook | enemies;
         const bitboard own_occ     = rook;
 
@@ -68,8 +71,8 @@ static void test_rooks()
          *  - Along rank 1: B1, C1 (enemy at C1 capturable, stop there)
          */
         bitboard expected = 0ULL;
-        expected |= SQUARE_MASK_A2 | SQUARE_MASK_A3;
-        expected |= SQUARE_MASK_B1 | SQUARE_MASK_C1;
+        expected |= SQ_MASK_A2 | SQ_MASK_A3;
+        expected |= SQ_MASK_B1 | SQ_MASK_C1;
 
         print_rook_test("Test 3: Rook at A1, enemy blockers A3, C1", sq, all_occ, own_occ);
 
@@ -79,13 +82,13 @@ static void test_rooks()
 
         /* Rook Test 6: center rook on empty board */
     {
-        const enum square_index sq = SQUARE_INDEX_E5;
-        const bitboard rook        = SQUARE_MASK_E5;
+        const enum square_index sq = SQ_INDEX_E5;
+        const bitboard rook        = SQ_MASK_E5;
         const bitboard all_occ     = rook;
         const bitboard own_occ     = rook;
 
         /* Full rank 5 and file E, except E5 itself */
-        bitboard expected = (FILEMASK_E | RANKMASK_5) & ~SQUARE_MASK_E5;
+        bitboard expected = (FILE_MASK_E | RANK_MASK_5) & ~SQ_MASK_E5;
 
         print_rook_test("Rook Test 6: E5, empty board", sq, all_occ, own_occ);
 
@@ -95,12 +98,12 @@ static void test_rooks()
 
     /* Rook Test 7: center rook, mixed blockers on rays */
     {
-        const enum square_index sq = SQUARE_INDEX_E5;
-        const bitboard rook        = SQUARE_MASK_E5;
+        const enum square_index sq = SQ_INDEX_E5;
+        const bitboard rook        = SQ_MASK_E5;
 
         /* Friendly: E7 and C5; Enemy: E3 and H5 */
-        const bitboard friends     = rook | SQUARE_MASK_E7 | SQUARE_MASK_C5;
-        const bitboard enemies     = SQUARE_MASK_E3 | SQUARE_MASK_H5;
+        const bitboard friends     = rook | SQ_MASK_E7 | SQ_MASK_C5;
+        const bitboard enemies     = SQ_MASK_E3 | SQ_MASK_H5;
         const bitboard all_occ     = friends | enemies;
         const bitboard own_occ     = friends;
 
@@ -112,10 +115,10 @@ static void test_rooks()
          *  Right:F5, G5, H5 (enemy, included, then stop)
          */
         bitboard expected = 0ULL;
-        expected |= SQUARE_MASK_E6;
-        expected |= SQUARE_MASK_E4 | SQUARE_MASK_E3;
-        expected |= SQUARE_MASK_D5;
-        expected |= SQUARE_MASK_F5 | SQUARE_MASK_G5 | SQUARE_MASK_H5;
+        expected |= SQ_MASK_E6;
+        expected |= SQ_MASK_E4 | SQ_MASK_E3;
+        expected |= SQ_MASK_D5;
+        expected |= SQ_MASK_F5 | SQ_MASK_G5 | SQ_MASK_H5;
 
         print_rook_test("Rook Test 7: E5, friends E7/C5, enemies E3/H5", sq, all_occ, own_occ);
 
@@ -125,8 +128,8 @@ static void test_rooks()
 
     /* Rook Test 8: edge rook on empty board (top edge, not corner) */
     {
-        const enum square_index sq = SQUARE_INDEX_C8;
-        const bitboard rook        = SQUARE_MASK_C8;
+        const enum square_index sq = SQ_INDEX_C8;
+        const bitboard rook        = SQ_MASK_C8;
         const bitboard all_occ     = rook;
         const bitboard own_occ     = rook;
 
@@ -136,8 +139,8 @@ static void test_rooks()
          *  Across rank 8: A8,B8,D8,E8,F8,G8,H8
          */
         bitboard expected = 0ULL;
-        expected |= (FILEMASK_C & ~SQUARE_MASK_C8);
-        expected |= (RANKMASK_8 & ~SQUARE_MASK_C8);
+        expected |= (FILE_MASK_C & ~SQ_MASK_C8);
+        expected |= (RANK_MASK_8 & ~SQ_MASK_C8);
 
         print_rook_test("Rook Test 8: C8, empty board", sq, all_occ, own_occ);
 
@@ -147,11 +150,11 @@ static void test_rooks()
 
     /* Rook Test 9: rook completely boxed in by friendly orthogonal neighbors */
     {
-        const enum square_index sq = SQUARE_INDEX_D4;
-        const bitboard rook        = SQUARE_MASK_D4;
+        const enum square_index sq = SQ_INDEX_D4;
+        const bitboard rook        = SQ_MASK_D4;
         const bitboard friends     = rook |
-                                     SQUARE_MASK_D5 | SQUARE_MASK_D3 |
-                                     SQUARE_MASK_C4 | SQUARE_MASK_E4;
+                                     SQ_MASK_D5 | SQ_MASK_D3 |
+                                     SQ_MASK_C4 | SQ_MASK_E4;
         const bitboard enemies     = 0ULL;
         const bitboard all_occ     = friends | enemies;
         const bitboard own_occ     = friends;
@@ -168,14 +171,14 @@ static void test_rooks()
 
     /* Rook Test 10: rook on file with non-interfering off-ray pieces */
     {
-        const enum square_index sq = SQUARE_INDEX_A4;
-        const bitboard rook        = SQUARE_MASK_A4;
+        const enum square_index sq = SQ_INDEX_A4;
+        const bitboard rook        = SQ_MASK_A4;
 
         /* Pieces placed off the rook's rank/file; they should have no effect */
-        const bitboard off_ray     = SQUARE_MASK_C1 | SQUARE_MASK_F6 | SQUARE_MASK_H8;
+        const bitboard off_ray     = SQ_MASK_C1 | SQ_MASK_F6 | SQ_MASK_H8;
         (void)off_ray;
-        const bitboard friends     = rook | SQUARE_MASK_C1;
-        const bitboard enemies     = SQUARE_MASK_F6 | SQUARE_MASK_H8;
+        const bitboard friends     = rook | SQ_MASK_C1;
+        const bitboard enemies     = SQ_MASK_F6 | SQ_MASK_H8;
         const bitboard all_occ     = friends | enemies;
         const bitboard own_occ     = friends;
 
@@ -186,7 +189,7 @@ static void test_rooks()
          * Pieces not on file A or rank 4 must not change attacks.
          */
         bitboard expected = 0ULL;
-        expected |= (FILEMASK_A | RANKMASK_4) & ~SQUARE_MASK_A4;
+        expected |= (FILE_MASK_A | RANK_MASK_4) & ~SQ_MASK_A4;
 
         print_rook_test("Rook Test 10: A4, random off-ray pieces C1/F6/H8",
                         sq, all_occ, own_occ);
@@ -217,8 +220,8 @@ static void test_bishops(void)
 {
     /* Test 1: Bishop at D4 on empty board (only bishop present) */
     {
-        const enum square_index sq = SQUARE_INDEX_D4;
-        const bitboard bishop      = SQUARE_MASK_D4;
+        const enum square_index sq = SQ_INDEX_D4;
+        const bitboard bishop      = SQ_MASK_D4;
         const bitboard all_occ     = bishop;
         const bitboard own_occ     = bishop;
 
@@ -230,10 +233,10 @@ static void test_bishops(void)
          *  SW: C3, B2, A1
          */
         bitboard expected = 0ULL;
-        expected |= SQUARE_MASK_E5 | SQUARE_MASK_F6 | SQUARE_MASK_G7 | SQUARE_MASK_H8;
-        expected |= SQUARE_MASK_C5 | SQUARE_MASK_B6 | SQUARE_MASK_A7;
-        expected |= SQUARE_MASK_E3 | SQUARE_MASK_F2 | SQUARE_MASK_G1;
-        expected |= SQUARE_MASK_C3 | SQUARE_MASK_B2 | SQUARE_MASK_A1;
+        expected |= SQ_MASK_E5 | SQ_MASK_F6 | SQ_MASK_G7 | SQ_MASK_H8;
+        expected |= SQ_MASK_C5 | SQ_MASK_B6 | SQ_MASK_A7;
+        expected |= SQ_MASK_E3 | SQ_MASK_F2 | SQ_MASK_G1;
+        expected |= SQ_MASK_C3 | SQ_MASK_B2 | SQ_MASK_A1;
 
         print_bishop_test("Bishop Test 1: D4, empty board", sq, all_occ, own_occ);
 
@@ -243,8 +246,8 @@ static void test_bishops(void)
 
     /* Test 2: Bishop at C1 on empty board (only bishop present) */
     {
-        const enum square_index sq = SQUARE_INDEX_C1;
-        const bitboard bishop      = SQUARE_MASK_C1;
+        const enum square_index sq = SQ_INDEX_C1;
+        const bitboard bishop      = SQ_MASK_C1;
         const bitboard all_occ     = bishop;
         const bitboard own_occ     = bishop;
 
@@ -255,9 +258,9 @@ static void test_bishops(void)
          *  SE / SW: none (edge of board)
          */
         bitboard expected = 0ULL;
-        expected |= SQUARE_MASK_D2 | SQUARE_MASK_E3 | SQUARE_MASK_F4 |
-                    SQUARE_MASK_G5 | SQUARE_MASK_H6;
-        expected |= SQUARE_MASK_B2 | SQUARE_MASK_A3;
+        expected |= SQ_MASK_D2 | SQ_MASK_E3 | SQ_MASK_F4 |
+                    SQ_MASK_G5 | SQ_MASK_H6;
+        expected |= SQ_MASK_B2 | SQ_MASK_A3;
 
         print_bishop_test("Bishop Test 2: C1, empty board", sq, all_occ, own_occ);
 
@@ -267,9 +270,9 @@ static void test_bishops(void)
 
     /* Test 3: Bishop at D4, friendly blockers at F6 and B2 (no enemies) */
     {
-        const enum square_index sq = SQUARE_INDEX_D4;
-        const bitboard bishop      = SQUARE_MASK_D4;
-        const bitboard friends     = bishop | SQUARE_MASK_F6 | SQUARE_MASK_B2;
+        const enum square_index sq = SQ_INDEX_D4;
+        const bitboard bishop      = SQ_MASK_D4;
+        const bitboard friends     = bishop | SQ_MASK_F6 | SQ_MASK_B2;
         const bitboard enemies     = 0ULL;
         const bitboard all_occ     = friends | enemies;
         const bitboard own_occ     = friends;
@@ -282,10 +285,10 @@ static void test_bishops(void)
          *  SE: E3, F2, G1 (no blockers)
          */
         bitboard expected = 0ULL;
-        expected |= SQUARE_MASK_E5;
-        expected |= SQUARE_MASK_C3;
-        expected |= SQUARE_MASK_C5 | SQUARE_MASK_B6 | SQUARE_MASK_A7;
-        expected |= SQUARE_MASK_E3 | SQUARE_MASK_F2 | SQUARE_MASK_G1;
+        expected |= SQ_MASK_E5;
+        expected |= SQ_MASK_C3;
+        expected |= SQ_MASK_C5 | SQ_MASK_B6 | SQ_MASK_A7;
+        expected |= SQ_MASK_E3 | SQ_MASK_F2 | SQ_MASK_G1;
 
         print_bishop_test("Bishop Test 3: D4, friendly blockers F6, B2", sq, all_occ, own_occ);
 
@@ -295,10 +298,10 @@ static void test_bishops(void)
 
     /* Test 4: Bishop at D4, enemy blockers at F6 and B2 (no other friends) */
     {
-        const enum square_index sq = SQUARE_INDEX_D4;
-        const bitboard bishop      = SQUARE_MASK_D4;
+        const enum square_index sq = SQ_INDEX_D4;
+        const bitboard bishop      = SQ_MASK_D4;
         const bitboard friends     = bishop;
-        const bitboard enemies     = SQUARE_MASK_F6 | SQUARE_MASK_B2;
+        const bitboard enemies     = SQ_MASK_F6 | SQ_MASK_B2;
         const bitboard all_occ     = friends | enemies;
         const bitboard own_occ     = friends;
 
@@ -310,10 +313,10 @@ static void test_bishops(void)
          *  SE: E3, F2, G1
          */
         bitboard expected = 0ULL;
-        expected |= SQUARE_MASK_E5 | SQUARE_MASK_F6;
-        expected |= SQUARE_MASK_C3 | SQUARE_MASK_B2;
-        expected |= SQUARE_MASK_C5 | SQUARE_MASK_B6 | SQUARE_MASK_A7;
-        expected |= SQUARE_MASK_E3 | SQUARE_MASK_F2 | SQUARE_MASK_G1;
+        expected |= SQ_MASK_E5 | SQ_MASK_F6;
+        expected |= SQ_MASK_C3 | SQ_MASK_B2;
+        expected |= SQ_MASK_C5 | SQ_MASK_B6 | SQ_MASK_A7;
+        expected |= SQ_MASK_E3 | SQ_MASK_F2 | SQ_MASK_G1;
 
         print_bishop_test("Bishop Test 4: D4, enemy blockers F6, B2", sq, all_occ, own_occ);
 
@@ -323,11 +326,11 @@ static void test_bishops(void)
 
     /* Test 5: Bishop at D4, mixed friend/enemy + another friendly bishop elsewhere */
     {
-        const enum square_index sq = SQUARE_INDEX_D4;
-        const bitboard bishop1     = SQUARE_MASK_D4;  /* tested bishop */
-        const bitboard bishop2     = SQUARE_MASK_F4;  /* another friendly bishop */
-        const bitboard friends     = bishop1 | bishop2 | SQUARE_MASK_F6;
-        const bitboard enemies     = SQUARE_MASK_B2;
+        const enum square_index sq = SQ_INDEX_D4;
+        const bitboard bishop1     = SQ_MASK_D4;  /* tested bishop */
+        const bitboard bishop2     = SQ_MASK_F4;  /* another friendly bishop */
+        const bitboard friends     = bishop1 | bishop2 | SQ_MASK_F6;
+        const bitboard enemies     = SQ_MASK_B2;
         const bitboard all_occ     = friends | enemies;
         const bitboard own_occ     = friends;
 
@@ -340,10 +343,10 @@ static void test_bishops(void)
          *  Bishop at F4 is irrelevant; it does not sit on a diagonal from D4.
          */
         bitboard expected = 0ULL;
-        expected |= SQUARE_MASK_E5;
-        expected |= SQUARE_MASK_C3 | SQUARE_MASK_B2;
-        expected |= SQUARE_MASK_C5 | SQUARE_MASK_B6 | SQUARE_MASK_A7;
-        expected |= SQUARE_MASK_E3 | SQUARE_MASK_F2 | SQUARE_MASK_G1;
+        expected |= SQ_MASK_E5;
+        expected |= SQ_MASK_C3 | SQ_MASK_B2;
+        expected |= SQ_MASK_C5 | SQ_MASK_B6 | SQ_MASK_A7;
+        expected |= SQ_MASK_E3 | SQ_MASK_F2 | SQ_MASK_G1;
 
         print_bishop_test("Bishop Test 5: D4, mixed friend/enemy + extra bishop F4", sq, all_occ, own_occ);
 
@@ -353,6 +356,7 @@ static void test_bishops(void)
 
     printf("\nAll bishop_attacks_from_index tests passed.\n");
 }
+
 
 int main()
 {
@@ -365,39 +369,39 @@ int main()
     fprintf(stdout, "\033[0m\n"); /* reset background color */
     struct board board = BOARD_INITIAL;
 
-    board_print(&board, stdout);
+    enum player player = PLAYER_WHITE;
+    enum square_index pieces[SQ_INDEX_COUNT] = {0};
+    struct move moves[MOVE_MAX] = {0};
+    for (int i = 0; i < 40; ++i) {
+        board_print_threats(&board, stdout, player);
 
-    printf("\nFile C3:\n");
-    bitboard_print(FILEMASK_C, stdout);
+        const size_t piece_count = all_player_pieces(&board, player, pieces);
 
-    printf("\nRank 2:\n");
-    bitboard_print(RANKMASK_2, stdout);
+        if (piece_count == 0) {
+            printf("no pieces for %s, aborting\n", player_str[player]);
+            break;
+        }
 
-    printf("\nKnight at C3 moves:\n");
-    bitboard_print(knight_attacks(SQUARE_MASK_C3), stdout);
+        size_t move_count;
+        for (size_t i = 0; i < piece_count; ++i) {
+            move_count = all_moves_from(&board, player, pieces[i], moves);
 
-    printf("\nKnight at B2 moves:\n");
-    bitboard_print(knight_attacks(SQUARE_MASK_B2), stdout);
+            if (move_count > 0) {
+                board_move_piece(&board, player, moves[0]);
+                break;
+            }
+        }
 
-    printf("\nKnight at A1, H8 moves:\n");
-    bitboard_print(knight_attacks(SQUARE_MASK_A1 | SQUARE_MASK_H8), stdout);
+        if (move_count == 0) {
+            printf("no moves for %s, aborting\n", player_str[player]);
+            break;
+        }
+        
+        player = opposite_player(player);
 
-    printf("\nWhite pawn at E4 moves:\n");
-    bitboard_print(
-            pawn_white_moves(
-                /* p */               SQUARE_MASK_E4,
-                /* empty */          ~0ULL 
-                ),
-            stdout);
-
-    printf("\nWhite pawns at E2, F4, A3 moves:\n");
-    bitboard_print(
-            pawn_white_moves(
-                /* p */      SQUARE_MASK_E2 | SQUARE_MASK_F4 | SQUARE_MASK_A3,
-                /* empty */ ~0ULL 
-                ),
-            stdout);
-
+        usleep(300000);
+    }
+    
     return EXIT_SUCCESS;
-
 }
+

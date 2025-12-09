@@ -51,7 +51,6 @@ ULL
 #define BITBOARD_FMT PRIu64
 #define BITBOARD_FMT_X PRIx64
 
-
 typedef uint64_t index;
 #define INDEX(n) n##ULL
 #define INDEX_FMT PRIu64
@@ -65,9 +64,9 @@ typedef uint64_t index;
 #define RANK_MASK(n) RANK_SHIFT_UP((index)0x00000000000000FFULL, n)
 
 #define INDEX_FROM_RF(rank, file) ((index)(8ULL*(index)(rank) + (index)(file)))
-#define SQUARE_MASK_FROM_RF(rank, file) ((index)1ULL << INDEX_FROM_RF(rank,file))
+#define SQ_MASK_FROM_RF(rank, file) ((index)1ULL << INDEX_FROM_RF(rank,file))
 
-#define SQUARE_MASK_FROM_INDEX(idx) (1ULL<<(idx))
+#define SQ_MASK_FROM_INDEX(idx) (1ULL<<(idx))
 
 enum file_index : index {
     FILE_INDEX_BEGIN,
@@ -95,48 +94,9 @@ enum rank_index : index {
     RANK_INDEX_COUNT,
 };
 
-enum : bitboard {
-    FILEMASK_A = FILE_MASK(FILE_INDEX_A),
-    FILEMASK_B = FILE_MASK(FILE_INDEX_B),
-    FILEMASK_C = FILE_MASK(FILE_INDEX_C),
-    FILEMASK_D = FILE_MASK(FILE_INDEX_D),
-    FILEMASK_E = FILE_MASK(FILE_INDEX_E),
-    FILEMASK_F = FILE_MASK(FILE_INDEX_F),
-    FILEMASK_G = FILE_MASK(FILE_INDEX_G),
-    FILEMASK_H = FILE_MASK(FILE_INDEX_H),
-
-    RANKMASK_1 = RANK_MASK(RANK_INDEX_1),
-    RANKMASK_2 = RANK_MASK(RANK_INDEX_2),
-    RANKMASK_3 = RANK_MASK(RANK_INDEX_3),
-    RANKMASK_4 = RANK_MASK(RANK_INDEX_4),
-    RANKMASK_5 = RANK_MASK(RANK_INDEX_5),
-    RANKMASK_6 = RANK_MASK(RANK_INDEX_6),
-    RANKMASK_7 = RANK_MASK(RANK_INDEX_7),
-    RANKMASK_8 = RANK_MASK(RANK_INDEX_8),
-
-    FILE_SHIFT_RIGHT_GUARD_0 = ~0ULL,
-    FILE_SHIFT_RIGHT_GUARD_1 = ~FILEMASK_H,
-    FILE_SHIFT_RIGHT_GUARD_2 = ~(FILEMASK_G | FILEMASK_H),
-    FILE_SHIFT_RIGHT_GUARD_3 = ~(FILEMASK_F | FILEMASK_G | FILEMASK_H),
-    FILE_SHIFT_RIGHT_GUARD_4 = ~(FILEMASK_E | FILEMASK_F | FILEMASK_G | FILEMASK_H),
-    FILE_SHIFT_RIGHT_GUARD_5 = ~(FILEMASK_D | FILEMASK_E | FILEMASK_F | FILEMASK_G | FILEMASK_H),
-    FILE_SHIFT_RIGHT_GUARD_6 = ~(FILEMASK_C | FILEMASK_D | FILEMASK_E | FILEMASK_F | FILEMASK_G | FILEMASK_H),
-    FILE_SHIFT_RIGHT_GUARD_7 = ~(FILEMASK_B | FILEMASK_C | FILEMASK_D | FILEMASK_E | FILEMASK_F | FILEMASK_G | FILEMASK_H),
-
-    FILE_SHIFT_LEFT_GUARD_0  = ~0ULL,
-    FILE_SHIFT_LEFT_GUARD_1  = ~FILEMASK_A,
-    FILE_SHIFT_LEFT_GUARD_2  = ~(FILEMASK_A | FILEMASK_B),
-    FILE_SHIFT_LEFT_GUARD_3  = ~(FILEMASK_A | FILEMASK_B | FILEMASK_C),
-    FILE_SHIFT_LEFT_GUARD_4  = ~(FILEMASK_A | FILEMASK_B | FILEMASK_C | FILEMASK_D),
-    FILE_SHIFT_LEFT_GUARD_5  = ~(FILEMASK_A | FILEMASK_B | FILEMASK_C | FILEMASK_D | FILEMASK_E),
-    FILE_SHIFT_LEFT_GUARD_6  = ~(FILEMASK_A | FILEMASK_B | FILEMASK_C | FILEMASK_D | FILEMASK_E | FILEMASK_F),
-    FILE_SHIFT_LEFT_GUARD_7  = ~(FILEMASK_A | FILEMASK_B | FILEMASK_C | FILEMASK_D | FILEMASK_E | FILEMASK_F | FILEMASK_G),
-};
-
-
 #define STR(x) #x
 
-#define SQUARE_MASK_PREFIX SQUARE_MASK_
+#define SQ_MASK_PREFIX SQ_MASK_
 #define SQUARES_LIST_BEGIN \
     X(A, 1)
 #define SQUARES_LIST \
@@ -203,45 +163,85 @@ enum : bitboard {
     X(H, 5) \
     X(H, 6) \
     X(H, 7) \
-    X(H, 8) \
+    X(H, 8)
 
-/* define mask constants: SQUARE_MASK_A1, SQUARE_MASK_A2, ..., SQUARE_MASK_H8 */
+/* define mask constants: SQ_MASK_A1, SQ_MASK_A2, ..., SQ_MASK_H8 */
 enum : bitboard {
-    #define X(file, rank) SQUARE_MASK_##file##rank = SQUARE_MASK_FROM_RF(RANK_INDEX_##rank, FILE_INDEX_##file),
+    #define X(file, rank) SQ_MASK_##file##rank = SQ_MASK_FROM_RF(RANK_INDEX_##rank, FILE_INDEX_##file),
     SQUARES_LIST
     #undef X
 };
 
 enum square_index : bitboard {
-    #define X(file, rank) SQUARE_INDEX_##file##rank = INDEX_FROM_RF(RANK_INDEX_##rank, FILE_INDEX_##file),
+    #define X(file, rank) SQ_INDEX_##file##rank = INDEX_FROM_RF(RANK_INDEX_##rank, FILE_INDEX_##file),
     SQUARES_LIST
-    SQUARE_INDEX_COUNT,
+    SQ_INDEX_COUNT,
     #undef X
     /* define iterator begin enum */
-    #define X(file, rank) SQUARE_INDEX_BEGIN = SQUARE_INDEX_##file##rank,
+    #define X(file, rank) SQ_INDEX_BEGIN = SQ_INDEX_##file##rank,
     SQUARES_LIST_BEGIN
     #undef X
 };
 
-const char* square_index_display[SQUARE_INDEX_COUNT] = {
+const char* square_index_display[SQ_INDEX_COUNT] = {
     #define X(file, rank) \
-    [SQUARE_INDEX_##file##rank] = STR(file##rank),
+    [SQ_INDEX_##file##rank] = STR(file##rank),
     SQUARES_LIST
     #undef X
 };
 
-const char* square_index_str[SQUARE_INDEX_COUNT] = {
+const char* square_index_str[SQ_INDEX_COUNT] = {
     #define X(file, rank) \
-    [SQUARE_INDEX_##file##rank] = STR(SQUARE_INDEX_##file##rank),
+    [SQ_INDEX_##file##rank] = STR(SQ_INDEX_##file##rank),
     SQUARES_LIST
     #undef X
 };
+
+enum : bitboard {
+    FILE_MASK_A = FILE_MASK(FILE_INDEX_A),
+    FILE_MASK_B = FILE_MASK(FILE_INDEX_B),
+    FILE_MASK_C = FILE_MASK(FILE_INDEX_C),
+    FILE_MASK_D = FILE_MASK(FILE_INDEX_D),
+    FILE_MASK_E = FILE_MASK(FILE_INDEX_E),
+    FILE_MASK_F = FILE_MASK(FILE_INDEX_F),
+    FILE_MASK_G = FILE_MASK(FILE_INDEX_G),
+    FILE_MASK_H = FILE_MASK(FILE_INDEX_H),
+
+    RANK_MASK_1 = RANK_MASK(RANK_INDEX_1),
+    RANK_MASK_2 = RANK_MASK(RANK_INDEX_2),
+    RANK_MASK_3 = RANK_MASK(RANK_INDEX_3),
+    RANK_MASK_4 = RANK_MASK(RANK_INDEX_4),
+    RANK_MASK_5 = RANK_MASK(RANK_INDEX_5),
+    RANK_MASK_6 = RANK_MASK(RANK_INDEX_6),
+    RANK_MASK_7 = RANK_MASK(RANK_INDEX_7),
+    RANK_MASK_8 = RANK_MASK(RANK_INDEX_8),
+
+    FILE_SHIFT_RIGHT_GUARD_0 = ~0ULL,
+    FILE_SHIFT_RIGHT_GUARD_1 = ~FILE_MASK_H,
+    FILE_SHIFT_RIGHT_GUARD_2 = ~(FILE_MASK_G | FILE_MASK_H),
+    FILE_SHIFT_RIGHT_GUARD_3 = ~(FILE_MASK_F | FILE_MASK_G | FILE_MASK_H),
+    FILE_SHIFT_RIGHT_GUARD_4 = ~(FILE_MASK_E | FILE_MASK_F | FILE_MASK_G | FILE_MASK_H),
+    FILE_SHIFT_RIGHT_GUARD_5 = ~(FILE_MASK_D | FILE_MASK_E | FILE_MASK_F | FILE_MASK_G | FILE_MASK_H),
+    FILE_SHIFT_RIGHT_GUARD_6 = ~(FILE_MASK_C | FILE_MASK_D | FILE_MASK_E | FILE_MASK_F | FILE_MASK_G | FILE_MASK_H),
+    FILE_SHIFT_RIGHT_GUARD_7 = ~(FILE_MASK_B | FILE_MASK_C | FILE_MASK_D | FILE_MASK_E | FILE_MASK_F | FILE_MASK_G | FILE_MASK_H),
+
+    FILE_SHIFT_LEFT_GUARD_0  = ~0ULL,
+    FILE_SHIFT_LEFT_GUARD_1  = ~FILE_MASK_A,
+    FILE_SHIFT_LEFT_GUARD_2  = ~(FILE_MASK_A | FILE_MASK_B),
+    FILE_SHIFT_LEFT_GUARD_3  = ~(FILE_MASK_A | FILE_MASK_B | FILE_MASK_C),
+    FILE_SHIFT_LEFT_GUARD_4  = ~(FILE_MASK_A | FILE_MASK_B | FILE_MASK_C | FILE_MASK_D),
+    FILE_SHIFT_LEFT_GUARD_5  = ~(FILE_MASK_A | FILE_MASK_B | FILE_MASK_C | FILE_MASK_D | FILE_MASK_E),
+    FILE_SHIFT_LEFT_GUARD_6  = ~(FILE_MASK_A | FILE_MASK_B | FILE_MASK_C | FILE_MASK_D | FILE_MASK_E | FILE_MASK_F),
+    FILE_SHIFT_LEFT_GUARD_7  = ~(FILE_MASK_A | FILE_MASK_B | FILE_MASK_C | FILE_MASK_D | FILE_MASK_E | FILE_MASK_F | FILE_MASK_G),
+};
+
+
 
 #define _FILE_SHIFT_RIGHT_GUARDED(b, n) \
-    ((((bitboard)(b)) & FILE_SHIFT_RIGHT_GUARD_##n) << ((index)(n) * 1ULL))
+    (((bitboard)(b) & FILE_SHIFT_RIGHT_GUARD_##n) << (index)(n))
 
 #define _FILE_SHIFT_LEFT_GUARDED(b, n)  \
-    ((((bitboard)(b)) & FILE_SHIFT_LEFT_GUARD_##n) >> ((index)(n) * 1ULL))
+    (((bitboard)(b) & FILE_SHIFT_LEFT_GUARD_##n) >> (index)(n))
 
 /* FILE_SHIFT_RIGHT_n shifts the bitboard right by n ranks without wrapping */
 #define FILE_SHIFT_RIGHT_1(b) _FILE_SHIFT_RIGHT_GUARDED(b, 1)
@@ -299,7 +299,14 @@ struct magic {
 
 static index bitboard_lsb(bitboard p)
 {
-    return __builtin_ffsll(p);
+    return __builtin_ffsll(p) - 1;
+}
+
+static index bitboard_pop_lsb(bitboard* p)
+{
+    const index lsb = bitboard_lsb(*p);
+    *p &= ~(1ULL<<(lsb));
+    return lsb;
 }
 
 static uint64_t bitboard_popcount(bitboard b)
@@ -321,7 +328,7 @@ static bitboard cardinals_from_index(enum square_index p)
 {
     /* might benefit from a lookup table */
     return (FILE_MASK(index_to_file(p)) | RANK_MASK(index_to_rank(p)))
-        & ~SQUARE_MASK_FROM_INDEX(p);
+        & ~SQ_MASK_FROM_INDEX(p);
 }
 
 static bitboard diagonals_from_index(enum square_index sq)
@@ -341,7 +348,7 @@ static bitboard diagonals_from_index(enum square_index sq)
          r <= RANK_INDEX_8 && f <= FILE_INDEX_H;
          ++r, ++f)
     {
-        mask |= SQUARE_MASK_FROM_RF(r, f);
+        mask |= SQ_MASK_FROM_RF(r, f);
     }
 
     /* NW (rank+1, file-1) */
@@ -349,7 +356,7 @@ static bitboard diagonals_from_index(enum square_index sq)
          r <= RANK_INDEX_8 && f <= FILE_INDEX_H;
          ++r, --f)
     {
-        mask |= SQUARE_MASK_FROM_RF(r, f);
+        mask |= SQ_MASK_FROM_RF(r, f);
     }
 
     /* SE (rank-1, file+1) */
@@ -357,7 +364,7 @@ static bitboard diagonals_from_index(enum square_index sq)
          r <= RANK_INDEX_8 && f <= FILE_INDEX_H;
          --r, ++f)
     {
-        mask |= SQUARE_MASK_FROM_RF(r, f);
+        mask |= SQ_MASK_FROM_RF(r, f);
     }
 
     /* SW (rank-1, file-1) */
@@ -365,7 +372,7 @@ static bitboard diagonals_from_index(enum square_index sq)
          r <= RANK_INDEX_8 && f <= FILE_INDEX_H;
          --r, --f)
     {
-        mask |= SQUARE_MASK_FROM_RF(r, f);
+        mask |= SQ_MASK_FROM_RF(r, f);
     }
 
     return mask;
@@ -374,14 +381,18 @@ static bitboard diagonals_from_index(enum square_index sq)
 
 
 /* PIECE ATTACKS
- * ================== */
+ * ==================
+ *
+ * All piece attack functions rely on the caller masking their own pieces.
+ * e.g. `knight_attacks(knights) & ~own_occupied`
+ * */
 
 static bitboard knight_attacks(bitboard p)
 {
-    const bitboard l1 = FILE_SHIFT_RIGHT_1(p & ~FILEMASK_H);
-    const bitboard l2 = FILE_SHIFT_RIGHT_2(p & ~(FILEMASK_G | FILEMASK_H));
-    const bitboard r1 = FILE_SHIFT_LEFT_1 (p & ~FILEMASK_A);
-    const bitboard r2 = FILE_SHIFT_LEFT_2 (p & ~(FILEMASK_A | FILEMASK_B));
+    const bitboard l1 = FILE_SHIFT_RIGHT_1(p & ~FILE_MASK_H);
+    const bitboard l2 = FILE_SHIFT_RIGHT_2(p & ~(FILE_MASK_G | FILE_MASK_H));
+    const bitboard r1 = FILE_SHIFT_LEFT_1 (p & ~FILE_MASK_A);
+    const bitboard r2 = FILE_SHIFT_LEFT_2 (p & ~(FILE_MASK_A | FILE_MASK_B));
     const bitboard h1 = l1 | r1;
     const bitboard h2 = l2 | r2;
     return RANK_SHIFT_UP_2(h1)
@@ -390,57 +401,6 @@ static bitboard knight_attacks(bitboard p)
          | RANK_SHIFT_DOWN_1(h2);
 }
 
-/* rook_attacks_from_index computes rook attack sets from an index, and its
- * purpose is code generation (the magic bitboard).
- *
- * It does not discriminate between friendly and opponent pieces, the caller
- * should therefore do something like:
- * ```
- *   rook_attacks_from_index(p, friendly_occ | opponent_occ) & ~friendly_occ
- * ```
- * */
-static bitboard rook_attacks_from_index_slow(enum square_index sq, bitboard occ)
-{
-    const enum rank_index rank = index_to_rank(sq);
-    const enum file_index file = index_to_file(sq);
-
-    bitboard atk = 0ULL;
-
-    /* following loops assume rank and file types are unsigned, which relies on C23 enums */
-    _Static_assert(((enum rank_index)0) - ((enum rank_index)1) > ((enum rank_index)0));
-    _Static_assert(((enum file_index)0) - ((enum file_index)1) > ((enum file_index)0));
-
-    for (enum rank_index walk_rank = rank+1; walk_rank <= RANK_INDEX_8; ++walk_rank) {
-        const bitboard sq = SQUARE_MASK_FROM_RF(walk_rank, file);
-        atk |= sq;
-        if (occ & sq) {
-            break;
-        }
-    }
-    for (enum rank_index walk_rank = rank-1; walk_rank <= RANK_INDEX_8; --walk_rank) {
-        const bitboard sq = SQUARE_MASK_FROM_RF(walk_rank, file);
-        atk |= sq;
-        if (occ & sq) {
-            break;
-        }
-    }
-    for (enum file_index walk_file = file+1; walk_file <= FILE_INDEX_H; ++walk_file) {
-        const bitboard sq = SQUARE_MASK_FROM_RF(rank, walk_file);
-        atk |= sq;
-        if (occ & sq) {
-            break;
-        }
-    }
-    for (enum file_index walk_file = file-1; walk_file <= FILE_INDEX_H; --walk_file) {
-        const bitboard sq = SQUARE_MASK_FROM_RF(rank, walk_file);
-        atk |= sq;
-        if (occ & sq) {
-            break;
-        }
-    }
-    
-    return atk;
-}
 
 static bitboard rook_attacks_from_index(enum square_index sq, bitboard occ)
 {
@@ -452,8 +412,8 @@ static bitboard rook_attacks_from_index(enum square_index sq, bitboard occ)
     #else
 
 /* defines
-   - `mbb_rook[SQUARE_INDEX_COUNT]`
-   - `bitboard rook_attacks[SQUARE_INDEX_COUNT][1<<12ULL] */
+   - `mbb_rook[SQ_INDEX_COUNT]`
+   - `bitboard rook_attacks[SQ_INDEX_COUNT][1<<12ULL] */
 #include "mbb_rook.h"
 
     const struct magic m = mbb_rook[sq];
@@ -470,73 +430,10 @@ static bitboard rook_attacks(bitboard p, bitboard occ)
 {
     bitboard b = 0ULL;
     while (p) {
-        const index lsb = bitboard_lsb(p) - 1;
-        p &= ~(1ULL<<(lsb));
+        const index lsb = bitboard_pop_lsb(&p);
         b |= rook_attacks_from_index(lsb, occ);
     }
     return b;
-}
-
-/* bishop_attacks_from_index computes bishop attack sets from an index, and its
- * purpose is code generation (the magic bitboard).
- *
- * It does not discriminate between friendly and opponent pieces, the caller
- * should therefore do something like:
- * ```
- *   bishop_attacks_from_index(p, occ) & ~friendly_occ
- * ```
- * */
-static bitboard bishop_attacks_from_index_slow(enum square_index sq, bitboard occ)
-{
-    const enum rank_index rank = index_to_rank(sq);
-    const enum file_index file = index_to_file(sq);
-
-    bitboard atk = 0ULL;
-
-    /* following loops assume rank and file types are unsigned, which relies on C23 enums */
-    _Static_assert(((enum rank_index)0) - ((enum rank_index)1) > ((enum rank_index)0));
-    _Static_assert(((enum file_index)0) - ((enum file_index)1) > ((enum file_index)0));
-
-    enum rank_index walk_rank;
-    enum file_index walk_file;
-    for (walk_rank = rank+1, walk_file = file+1;
-            walk_rank <= RANK_INDEX_8 && walk_file <= FILE_INDEX_H;
-            ++walk_rank, ++walk_file) {
-        const bitboard sq = SQUARE_MASK_FROM_RF(walk_rank, walk_file);
-        atk |= sq;
-        if (occ & sq) {
-            break;
-        }
-    }
-    for (walk_rank = rank+1, walk_file = file-1;
-            walk_rank <= RANK_INDEX_8 && walk_file <= FILE_INDEX_H;
-            ++walk_rank, --walk_file) {
-        const bitboard sq = SQUARE_MASK_FROM_RF(walk_rank, walk_file);
-        atk |= sq;
-        if (occ & sq) {
-            break;
-        }
-    }
-    for (walk_rank = rank-1, walk_file = file+1;
-            walk_rank <= RANK_INDEX_8 && walk_file <= FILE_INDEX_H;
-            --walk_rank, ++walk_file) {
-        const bitboard sq = SQUARE_MASK_FROM_RF(walk_rank, walk_file);
-        atk |= sq;
-        if (occ & sq) {
-            break;
-        }
-    }
-    for (walk_rank = rank-1, walk_file = file-1;
-            walk_rank <= RANK_INDEX_8 && walk_file <= FILE_INDEX_H;
-            --walk_rank, --walk_file) {
-        const bitboard sq = SQUARE_MASK_FROM_RF(walk_rank, walk_file);
-        atk |= sq;
-        if (occ & sq) {
-            break;
-        }
-    }
-    
-    return atk;
 }
 
 static bitboard bishop_attacks_from_index(enum square_index sq, bitboard occ)
@@ -549,8 +446,8 @@ static bitboard bishop_attacks_from_index(enum square_index sq, bitboard occ)
     #else
 
 /* defines
-   - `mbb_bishop[SQUARE_INDEX_COUNT]`
-   - `bitboard bishop_attacks[SQUARE_INDEX_COUNT][1<<9ULL] */
+   - `mbb_bishop[SQ_INDEX_COUNT]`
+   - `bitboard bishop_attacks[SQ_INDEX_COUNT][1<<9ULL] */
 #include "mbb_bishop.h"
     const struct magic m = mbb_bishop[sq];
     occ &= m.mask;
@@ -565,75 +462,88 @@ static bitboard bishop_attacks(bitboard p, bitboard occ)
 {
     bitboard b = 0ULL;
     while (p) {
-        const index lsb = bitboard_lsb(p) - 1;
-        p &= ~(1ULL<<(lsb));
+        const index lsb = bitboard_pop_lsb(&p);
         b |= bishop_attacks_from_index(lsb, occ);
     }
     return b;
 }
 
-static inline bitboard pawn_white_moves(bitboard p, bitboard empty)
+static bitboard queen_attacks_from_index(enum square_index sq, bitboard occ)
+{
+    return bishop_attacks_from_index(sq, occ) | rook_attacks_from_index(sq, occ);
+}
+
+static bitboard queen_attacks(bitboard p, bitboard occ)
+{
+    bitboard b = 0ULL;
+    while (p) {
+        const index lsb = bitboard_pop_lsb(&p);
+        b |= queen_attacks_from_index(lsb, occ);
+    }
+    return b;
+}
+
+static inline bitboard pawn_moves_white(bitboard p, bitboard empty)
 {
     /* Assumptions:
        - empty = ~(black_occupied | white_occupied);
      */
 
-    const bitboard single_push = RANK_SHIFT_UP(p, 1) & empty;
+    const bitboard single_push = RANK_SHIFT_UP_1(p) & empty;
 
     const bitboard double_push =
-        RANK_SHIFT_UP(single_push & RANKMASK_3, 1) & empty;
+        RANK_SHIFT_UP_1(single_push & RANK_MASK_3) & empty;
 
-    return single_push | double_push;
+    return (single_push | double_push);
 }
 
-static inline bitboard pawn_white_attacks(bitboard p, bitboard ep_targets, bitboard black_occupied)
+static inline bitboard pawn_attacks_white(bitboard p)
 {
-    const bitboard up = RANK_SHIFT_UP(p, 1);
-    const bitboard captures_right = FILE_SHIFT_RIGHT(up, 1) & ~FILEMASK_H;
-    const bitboard captures_left  = FILE_SHIFT_LEFT(up, 1) & ~FILEMASK_A;
+    const bitboard up = RANK_SHIFT_UP_1(p);
+    const bitboard captures_right = FILE_SHIFT_RIGHT_1(up);
+    const bitboard captures_left  = FILE_SHIFT_LEFT_1(up);
 
-    return (captures_right | captures_left) & (black_occupied | ep_targets);
+    return (captures_right | captures_left);
 }
 
-static inline bitboard pawn_black_moves(bitboard p, bitboard empty)
+static inline bitboard pawn_moves_black(bitboard p, bitboard empty)
 {
     /* Assumptions:
        - empty = ~(black_occupied | white_occupied);
      */
 
-    const bitboard single_push = RANK_SHIFT_DOWN(p, 1) & empty;
+    const bitboard single_push = RANK_SHIFT_DOWN_1(p) & empty;
 
     const bitboard double_push =
-        RANK_SHIFT_DOWN(single_push & RANKMASK_6, 1) & empty;
+        RANK_SHIFT_DOWN_1(single_push & RANK_MASK_6) & empty;
 
-    return single_push | double_push;
+    return (single_push | double_push);
 }
 
-static inline bitboard pawn_black_attacks(bitboard p, bitboard ep_targets, bitboard white_occupied)
+static inline bitboard pawn_attacks_black(bitboard p)
 {
-    const bitboard down = RANK_SHIFT_UP(p, 1);
-    const bitboard captures_right = FILE_SHIFT_RIGHT(down, 1) & ~FILEMASK_H;
-    const bitboard captures_left  = FILE_SHIFT_LEFT(down, 1) & ~FILEMASK_A;
+    const bitboard down = RANK_SHIFT_DOWN_1(p);
+    const bitboard captures_right = FILE_SHIFT_RIGHT_1(down);
+    const bitboard captures_left  = FILE_SHIFT_LEFT_1(down);
 
-    return (captures_right | captures_left) & (white_occupied | ep_targets);
+    return (captures_right | captures_left);
 }
 
 static bitboard king_attacks(enum square_index sq)
 {
     /* candidate for improvement */
-    const bitboard n = RANK_SHIFT_UP(sq, 1);
-    const bitboard s = RANK_SHIFT_DOWN(sq, 1);
-    const bitboard w = FILE_SHIFT_LEFT(sq, 1);
-    const bitboard e = FILE_SHIFT_RIGHT(sq, 1);
+    const bitboard n = RANK_SHIFT_UP_1(sq);
+    const bitboard s = RANK_SHIFT_DOWN_1(sq);
+    const bitboard w = FILE_SHIFT_LEFT_1(sq);
+    const bitboard e = FILE_SHIFT_RIGHT_1(sq);
 
-    const bitboard nw = FILE_SHIFT_LEFT(n, 1);
-    const bitboard ne = FILE_SHIFT_RIGHT(n, 1);
-    const bitboard sw = FILE_SHIFT_RIGHT(s, 1);
-    const bitboard se = FILE_SHIFT_LEFT(s, 1);
+    const bitboard nw = FILE_SHIFT_LEFT_1(n);
+    const bitboard ne = FILE_SHIFT_RIGHT_1(n);
+    const bitboard sw = FILE_SHIFT_RIGHT_1(s);
+    const bitboard se = FILE_SHIFT_LEFT_1(s);
 
-    return n | s | w | e | nw | ne | sw | se;
+    return (n | s | w | e | nw | ne | sw | se);
 }
-
 
 /* BOARD
  * ================= */
@@ -644,80 +554,308 @@ enum player : index {
     PLAYER_COUNT,
 };
 
-enum piece : index {
-    PIECE_BEGIN,
-    PIECE_PAWN = PIECE_BEGIN,
-    PIECE_KING,
-    PIECE_QUEEN,
-    PIECE_BISHOP,
-    PIECE_ROOK,
-    PIECE_KNIGHT,
+static inline enum player opposite_player(enum player p)
+{
+    return (p == PLAYER_WHITE ? PLAYER_BLACK : PLAYER_WHITE);
+} 
+
+const char* player_str[PLAYER_COUNT] = {
+    [PLAYER_WHITE] = "PLAYER_WHITE",
+    [PLAYER_BLACK] = "PLAYER_BLACK",
+};
+
+#define PIECE_BEGIN PIECE_PAWN
+/*    enum          value       white char   white unicode   black char    black unicode  */
+#define PIECES \
+    X(PIECE_PAWN,     1.0,             'P',         0x2659,         'p',          0x265F) \
+    X(PIECE_KING,     5.0,             'K',         0x2654,         'k',          0x265A) \
+    X(PIECE_QUEEN,    9.0,             'Q',         0x2655,         'q',          0x265B) \
+    X(PIECE_BISHOP,   3.0,             'Q',         0x2657,         'q',          0x265D) \
+    X(PIECE_ROOK,     5.0,             'R',         0x2656,         'q',          0x265C) \
+    X(PIECE_KNIGHT,   3.0,             'N',         0x2658,         'n',          0x265E)
+
+enum piece : size_t {
+#define X(e, v, wc, wu, bc, bu) e,
+    PIECES
     PIECE_COUNT,
+#undef X
+};
+
+double piece_value[PIECE_COUNT] = {
+#define X(e, v, wc, wu, bc, bu) [e] = v,
+    PIECES
+#undef X
+};
+
+const char* piece_str[PIECE_COUNT] = {
+#define X(e, v, wc, wu, bc, bu) [e] = STR(e),
+    PIECES
+#undef X
 };
 
 const char piece_char[PLAYER_COUNT][PIECE_COUNT] = {
     [PLAYER_WHITE] = {
-        [PIECE_PAWN]   = 'P',
-        [PIECE_KING]   = 'K',
-        [PIECE_QUEEN]  = 'Q',
-        [PIECE_BISHOP] = 'B',
-        [PIECE_ROOK]   = 'R',
-        [PIECE_KNIGHT] = 'N',
+#define X(e, v, wc, wu, bc, bu) [e] = wc,
+        PIECES
+#undef X
     },
     [PLAYER_BLACK] = {
-        [PIECE_PAWN]   = 'p',
-        [PIECE_KING]   = 'k',
-        [PIECE_QUEEN]  = 'q',
-        [PIECE_BISHOP] = 'b',
-        [PIECE_ROOK]   = 'r',
-        [PIECE_KNIGHT] = 'n',
+#define X(e, v, wc, wu, bc, bu) [e] = bc,
+        PIECES
+#undef X
     }
 };
 
 const int piece_unicode[PLAYER_COUNT][PIECE_COUNT] = {
     [PLAYER_WHITE] = {
-        [PIECE_PAWN]   = 0x2659,
-        [PIECE_KING]   = 0x2654,
-        [PIECE_QUEEN]  = 0x2655,
-        [PIECE_BISHOP] = 0x2657,
-        [PIECE_ROOK]   = 0x2656,
-        [PIECE_KNIGHT] = 0x2658,
+#define X(e, v, wc, wu, bc, bu) [e] = wu,
+        PIECES
+#undef X
     },
     [PLAYER_BLACK] = {
-        [PIECE_PAWN]   = 0x265F,
-        [PIECE_KING]   = 0x265A,
-        [PIECE_QUEEN]  = 0x265B,
-        [PIECE_BISHOP] = 0x265D,
-        [PIECE_ROOK]   = 0x265C,
-        [PIECE_KNIGHT] = 0x265E,
+#define X(e, v, wc, wu, bc, bu) [e] = bu,
+        PIECES
+#undef X
     }
 };
 
 struct board {
     bitboard pieces[PLAYER_COUNT][PIECE_COUNT];
-    bitboard enpassent_targets[PLAYER_COUNT];
+    bitboard ep_targets;
     bitboard occupied[PLAYER_COUNT];
+
+    /* Used only for square->piece lookups, not central to logic.
+     * Does not store which player owns the square piece */
+    enum piece mailbox[SQ_INDEX_COUNT];
 };
 
-#define BOARD_INITIAL (struct board) {                        \
-    .pieces = {                                               \
-        [PLAYER_WHITE] = {                                    \
-            [PIECE_PAWN]   = RANKMASK_2,                      \
-            [PIECE_ROOK]   = SQUARE_MASK_A1 | SQUARE_MASK_H1, \
-            [PIECE_KNIGHT] = SQUARE_MASK_B1 | SQUARE_MASK_G1, \
-            [PIECE_BISHOP] = SQUARE_MASK_C1 | SQUARE_MASK_F1, \
-            [PIECE_QUEEN]  = SQUARE_MASK_D1,                  \
-            [PIECE_KING]   = SQUARE_MASK_E1,                  \
-        },                                                    \
-        [PLAYER_BLACK] = {                                    \
-            [PIECE_PAWN]   = RANKMASK_7,                      \
-            [PIECE_ROOK]   = SQUARE_MASK_A8 | SQUARE_MASK_H8, \
-            [PIECE_KNIGHT] = SQUARE_MASK_B8 | SQUARE_MASK_G8, \
-            [PIECE_BISHOP] = SQUARE_MASK_C8 | SQUARE_MASK_F8, \
-            [PIECE_QUEEN]  = SQUARE_MASK_D8,                  \
-            [PIECE_KING]   = SQUARE_MASK_E8,                  \
-        }                                                     \
-    }                                                         \
+#define BOARD_INITIAL (struct board) {                \
+    .pieces = {                                       \
+        [PLAYER_WHITE] = {                            \
+            [PIECE_PAWN]   = RANK_MASK_2,             \
+            [PIECE_ROOK]   = SQ_MASK_A1 | SQ_MASK_H1, \
+            [PIECE_KNIGHT] = SQ_MASK_B1 | SQ_MASK_G1, \
+            [PIECE_BISHOP] = SQ_MASK_C1 | SQ_MASK_F1, \
+            [PIECE_QUEEN]  = SQ_MASK_D1,              \
+            [PIECE_KING]   = SQ_MASK_E1,              \
+        },                                            \
+        [PLAYER_BLACK] = {                            \
+            [PIECE_PAWN]   = RANK_MASK_7,             \
+            [PIECE_ROOK]   = SQ_MASK_A8 | SQ_MASK_H8, \
+            [PIECE_KNIGHT] = SQ_MASK_B8 | SQ_MASK_G8, \
+            [PIECE_BISHOP] = SQ_MASK_C8 | SQ_MASK_F8, \
+            [PIECE_QUEEN]  = SQ_MASK_D8,              \
+            [PIECE_KING]   = SQ_MASK_E8,              \
+        }                                             \
+    },                                                \
+    .ep_targets = 0ULL,                               \
+    .occupied = {                                     \
+        [PLAYER_WHITE] =                              \
+            RANK_MASK_2 | SQ_MASK_A1 | SQ_MASK_H1 |   \
+            SQ_MASK_B1 | SQ_MASK_G1 | SQ_MASK_C1 |    \
+            SQ_MASK_F1 | SQ_MASK_D1 | SQ_MASK_E1,     \
+        [PLAYER_BLACK] =                              \
+            RANK_MASK_7 | SQ_MASK_A8 | SQ_MASK_H8 |   \
+            SQ_MASK_B8 | SQ_MASK_G8| SQ_MASK_C8 |     \
+            SQ_MASK_F8| SQ_MASK_D8| SQ_MASK_E8,       \
+    },                                                \
+    .mailbox = {                                      \
+        [SQ_INDEX_A1] = PIECE_ROOK,                   \
+        [SQ_INDEX_B1] = PIECE_KNIGHT,                 \
+        [SQ_INDEX_C1] = PIECE_BISHOP,                 \
+        [SQ_INDEX_D1] = PIECE_QUEEN,                  \
+        [SQ_INDEX_E1] = PIECE_KING,                   \
+        [SQ_INDEX_F1] = PIECE_BISHOP,                 \
+        [SQ_INDEX_G1] = PIECE_KNIGHT,                 \
+        [SQ_INDEX_H1] = PIECE_ROOK,                   \
+        [SQ_INDEX_A2] = PIECE_PAWN,                   \
+        [SQ_INDEX_B2] = PIECE_PAWN,                   \
+        [SQ_INDEX_C2] = PIECE_PAWN,                   \
+        [SQ_INDEX_D2] = PIECE_PAWN,                   \
+        [SQ_INDEX_E2] = PIECE_PAWN,                   \
+        [SQ_INDEX_F2] = PIECE_PAWN,                   \
+        [SQ_INDEX_G2] = PIECE_PAWN,                   \
+        [SQ_INDEX_H2] = PIECE_PAWN,                   \
+        [SQ_INDEX_A7] = PIECE_PAWN,                   \
+        [SQ_INDEX_B7] = PIECE_PAWN,                   \
+        [SQ_INDEX_C7] = PIECE_PAWN,                   \
+        [SQ_INDEX_D7] = PIECE_PAWN,                   \
+        [SQ_INDEX_E7] = PIECE_PAWN,                   \
+        [SQ_INDEX_F7] = PIECE_PAWN,                   \
+        [SQ_INDEX_G7] = PIECE_PAWN,                   \
+        [SQ_INDEX_H7] = PIECE_PAWN,                   \
+        [SQ_INDEX_A8] = PIECE_ROOK,                   \
+        [SQ_INDEX_B8] = PIECE_KNIGHT,                 \
+        [SQ_INDEX_C8] = PIECE_BISHOP,                 \
+        [SQ_INDEX_D8] = PIECE_QUEEN,                  \
+        [SQ_INDEX_E8] = PIECE_KING,                   \
+        [SQ_INDEX_F8] = PIECE_BISHOP,                 \
+        [SQ_INDEX_G8] = PIECE_KNIGHT,                 \
+        [SQ_INDEX_H8] = PIECE_ROOK,                   \
+    },                                                \
+}
+
+double board_score_heuristic(const struct board* board, enum player player)
+{
+    double score = 0.0;
+
+    enum player opp = opposite_player(player);
+
+    for (enum piece piece = PIECE_BEGIN; piece < PIECE_COUNT; ++piece) {
+        score += (double)bitboard_popcount(board->pieces[player][piece]) * piece_value[piece];
+    }
+    for (enum piece piece = PIECE_BEGIN; piece < PIECE_COUNT; ++piece) {
+        score -= (double)bitboard_popcount(board->pieces[opp][piece]) * piece_value[piece];
+    }
+
+    return score;
+}
+
+struct move {
+    index from;
+    index to;
+};
+
+struct move move(index from, index to)
+{
+    return (struct move){
+        .from = from,
+        .to = to
+    };
+}
+
+#define MOVE_MAX 32
+
+static size_t all_moves_from(const struct board* board,
+                            enum player          player,
+                            enum square_index    from,
+                            struct move          moves[static MOVE_MAX])
+{
+    const enum piece piece = board->mailbox[from];
+
+    const enum player opp = opposite_player(player);
+
+    const bitboard own_occ = board->occupied[player];
+    const bitboard opp_occ = board->occupied[opp];
+    const bitboard occ = own_occ | opp_occ;
+
+    const bitboard sqmask = SQ_MASK_FROM_INDEX(from);
+
+    bitboard x = 0ULL;
+
+    switch (piece) {
+        case PIECE_PAWN: {
+            if (player == PLAYER_WHITE) {
+                x |= pawn_moves_white(sqmask, ~occ);
+                x |= pawn_attacks_white(sqmask) & (board->ep_targets | opp_occ);
+            } else {
+                x |= pawn_moves_black(sqmask, ~occ);
+                x |= pawn_attacks_black(sqmask) & (board->ep_targets | opp_occ);
+            }
+        } break;
+
+        case PIECE_KNIGHT: {
+            x |= knight_attacks(sqmask);
+        } break;
+
+        case PIECE_BISHOP: {
+            x |= bishop_attacks_from_index(from, occ);
+        } break;
+
+        case PIECE_ROOK: {
+            x |= rook_attacks_from_index(from, occ);
+        } break;
+
+        case PIECE_QUEEN: {
+            x |= queen_attacks_from_index(from, occ);
+        } break;
+
+        case PIECE_KING: {
+            x |= king_attacks(sqmask);
+        } break;
+    }
+
+    x &= ~board->occupied[player];
+
+    size_t move_count = 0;
+    while (x) {
+        const index to = bitboard_pop_lsb(&x);
+        moves[move_count++] = (struct move){.from = from, .to = to};
+    }
+    return move_count;
+}
+
+static size_t all_player_pieces(struct board* board,
+                                enum player player,
+                                enum square_index out[static SQ_INDEX_COUNT])
+{
+    size_t count = 0;
+
+    fprintf(stderr, "%s\n", player_str[player]);
+    for (enum piece piece = PIECE_BEGIN; piece < PIECE_COUNT; ++piece) {
+        bitboard x = board->pieces[player][piece];
+        fprintf(stderr, "%s:\t%016"BITBOARD_FMT_X"\n", piece_str[piece], x);
+        while (x) {
+            out[count++] = (enum square_index)bitboard_pop_lsb(&x);
+        }
+    }
+
+    return count;
+}
+
+/* caller is resposible for checking validity */
+static void board_move_piece(struct board* board,
+                             enum player player,
+                             struct move move)
+{
+    const bitboard from_mask = SQ_MASK_FROM_INDEX(move.from);
+    const bitboard to_mask = SQ_MASK_FROM_INDEX(move.to);
+
+    const enum player opp = opposite_player(player);
+    const enum piece from_piece = board->mailbox[move.from];
+    const enum piece to_piece   = board->mailbox[move.to];
+
+    board->pieces[player][from_piece] &= ~from_mask;
+    board->pieces[player][from_piece] |= to_mask;
+    board->pieces[opp][to_piece] &= ~to_mask;
+
+    board->occupied[player] &= ~from_mask;
+    board->occupied[player] |= to_mask;
+    board->occupied[opp] &= ~to_mask;
+
+    /* mailboxes are solely used for fast lookups of pieces in already valid
+     * moves, it's safe to ignore the from index */
+    board->mailbox[move.to] = from_piece;
+}
+
+static bool board_is_check(struct board* b, enum player player)
+{
+    const bitboard kb = b->pieces[player][PIECE_KING];
+
+    const enum player opp = opposite_player(player);
+
+    const bitboard player_occ = bitboard->occupied[player];
+    const bitboard opp_occ = bitboard->occupied[opp];
+    const bitboard occ = player_occ | opp_occ;
+    const bitboard* p = b->pieces[opp];
+
+    bitboard threats = 0ULL;
+    if (player == PLAYER_WHITE) {
+        threats |= pawn_attacks_white(p[PIECE_PAWN]);
+    } else {
+        threats |= pawn_attacks_black(p[PIECE_PAWN]);
+    }
+    threats |= bishop_attacks(p[PIECE_BISHOP], occ);
+    threats |= rook_attacks(p[PIECE_ROOK], occ);
+    threats |= king_attacks(p[PIECE_KING]);
+    threats |= queen_attacks(p[PIECE_QUEEN], occ);
+    threats |= knight_attacks(p[PIECE_KNIGHT]);
+    threats &= ~player_occ;
+
+    if (threats & kb) {
+        return true;
+    }
+    return false;
 }
 
 void board_print(struct board* b, FILE* out)
@@ -765,9 +903,6 @@ void board_print(struct board* b, FILE* out)
     fprintf(out, "  A B C D E F G H \n");
 }
 
-/* debug functions
- * =============== */
-
 void bitboard_print(bitboard b, FILE* out)
 {
     setlocale(LC_ALL, "");
@@ -794,3 +929,76 @@ void bitboard_print(bitboard b, FILE* out)
     fprintf(out, "  A B C D E F G H \n");
 }
 
+void board_print_threats(struct board* b, FILE* out, enum player player)
+{
+    int buf[8][8] = {0};
+
+    for (size_t i = 0; i < 8; i++) {
+        for (size_t i = 0; i < 8; i++) {
+            buf[i][i] = 0;
+        }
+    }
+
+    enum player opp = opposite_player(player);
+    bitboard opp_occ = 0ULL,
+             own_occ = 0ULL;
+    for (enum piece piece = PIECE_BEGIN; piece < PIECE_COUNT; ++piece) {
+        opp_occ |= b->pieces[opp][piece];
+        own_occ |= b->pieces[player][piece];
+    }
+    const bitboard occ = opp_occ | own_occ;
+
+    bitboard threats = 0ULL;
+
+    const bitboard* p = b->pieces[player];
+    if (player == PLAYER_WHITE) {
+        threats |= pawn_attacks_white(p[PIECE_PAWN]);
+    } else {
+        threats |= pawn_attacks_black(p[PIECE_PAWN]);
+    }
+    threats |= bishop_attacks(p[PIECE_BISHOP], occ);
+    threats |= rook_attacks(p[PIECE_ROOK], occ);
+    threats |= king_attacks(p[PIECE_KING]);
+    threats |= queen_attacks(p[PIECE_QUEEN], occ);
+    threats |= knight_attacks(p[PIECE_KNIGHT]);
+    threats &= ~own_occ;
+
+    for (enum player player = PLAYER_BEGIN; player < PLAYER_COUNT; player++) {
+        for (enum piece piece = PIECE_BEGIN; piece < PIECE_COUNT; piece++) {
+            bitboard x = b->pieces[player][piece];
+
+            for (index i = 7; i < 8; i--) {
+                for (index j = 0; j < 8; j++) {
+                    if (x & (1ULL<<(i*8+j))) {
+                        buf[i][j] = piece_unicode[player][piece];
+                    }
+                }
+            }
+        }
+    }
+
+    /* see: https://en.wikipedia.org/wiki/ANSI_escape_code#Colors */
+    setlocale(LC_ALL, "");
+    for (index i = 7; i < 8; i--) {
+        fprintf(out, "\033[0m"); /* reset background color */
+        fprintf(out, "%"INDEX_FMT" ", i+1);
+        for (index j = 0; j < 8; j++) {
+            const index n = i*8+j;
+            if ((threats >> n) & 1) {
+                fprintf(out, "\033[%d;%dm", 30, 41);
+            } else {
+                /* 45: magenta, 47: white */
+                fprintf(out, "\033[%d;%dm", 30, (i+j) % 2 ? 45 : 47);
+            }
+            if (buf[i][j]) {
+                fprintf(out, "%lc ", buf[i][j]);
+            } else {
+                fprintf(out, "  "); /* idk why this hack is needed but "%lc "
+                                       is not working when buf[i][j] = ' ' */
+            }
+        }
+        fprintf(out, "\033[0m"); /* reset background color */
+        fprintf(out, "\n");
+    }
+    fprintf(out, "  A B C D E F G H \n");
+}

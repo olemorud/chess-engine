@@ -1,5 +1,5 @@
 
-CFLAGS := -std=c23
+CFLAGS := -std=c23 -g
 
 all: tests
 
@@ -7,10 +7,10 @@ codegen: codegen.c
 	$(CC) -o $@ $(CFLAGS) -DCODEGEN $^
 
 mbb_rook.h: codegen
-	./codegen
+	#./codegen
 
 mbb_bishop.h: codegen
-	./codegen
+	#./codegen
 
-tests: tests.c | mbb_rook.h mbb_bishop.h
+tests: tests.c | mbb_rook.h mbb_bishop.h base.h
 	$(CC) -o $@ $(CFLAGS) $^
