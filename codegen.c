@@ -1,103 +1,7 @@
-
+#define CODEGEN
 #include "base.h"
 #include <stdlib.h>
 #include <stdio.h>
-
-static bitboard bishop_attacks_from_index_slow(enum square_index sq, bitboard occ)
-{
-    const enum rank_index rank = index_to_rank(sq);
-    const enum file_index file = index_to_file(sq);
-
-    bitboard atk = 0ULL;
-
-    /* following loops assume rank and file types are unsigned, which relies on C23 enums */
-    _Static_assert(((enum rank_index)0) - ((enum rank_index)1) > ((enum rank_index)0));
-    _Static_assert(((enum file_index)0) - ((enum file_index)1) > ((enum file_index)0));
-
-    enum rank_index walk_rank;
-    enum file_index walk_file;
-    for (walk_rank = rank+1, walk_file = file+1;
-            walk_rank <= RANK_INDEX_8 && walk_file <= FILE_INDEX_H;
-            ++walk_rank, ++walk_file) {
-        const bitboard sq = SQ_MASK_FROM_RF(walk_rank, walk_file);
-        atk |= sq;
-        if (occ & sq) {
-            break;
-        }
-    }
-    for (walk_rank = rank+1, walk_file = file-1;
-            walk_rank <= RANK_INDEX_8 && walk_file <= FILE_INDEX_H;
-            ++walk_rank, --walk_file) {
-        const bitboard sq = SQ_MASK_FROM_RF(walk_rank, walk_file);
-        atk |= sq;
-        if (occ & sq) {
-            break;
-        }
-    }
-    for (walk_rank = rank-1, walk_file = file+1;
-            walk_rank <= RANK_INDEX_8 && walk_file <= FILE_INDEX_H;
-            --walk_rank, ++walk_file) {
-        const bitboard sq = SQ_MASK_FROM_RF(walk_rank, walk_file);
-        atk |= sq;
-        if (occ & sq) {
-            break;
-        }
-    }
-    for (walk_rank = rank-1, walk_file = file-1;
-            walk_rank <= RANK_INDEX_8 && walk_file <= FILE_INDEX_H;
-            --walk_rank, --walk_file) {
-        const bitboard sq = SQ_MASK_FROM_RF(walk_rank, walk_file);
-        atk |= sq;
-        if (occ & sq) {
-            break;
-        }
-    }
-    
-    return atk;
-}
-
-static bitboard rook_attacks_from_index_slow(enum square_index sq, bitboard occ)
-{
-    const enum rank_index rank = index_to_rank(sq);
-    const enum file_index file = index_to_file(sq);
-
-    bitboard atk = 0ULL;
-
-    /* following loops assume rank and file types are unsigned, which relies on C23 enums */
-    _Static_assert(((enum rank_index)0) - ((enum rank_index)1) > ((enum rank_index)0));
-    _Static_assert(((enum file_index)0) - ((enum file_index)1) > ((enum file_index)0));
-
-    for (enum rank_index walk_rank = rank+1; walk_rank <= RANK_INDEX_8; ++walk_rank) {
-        const bitboard sq = SQ_MASK_FROM_RF(walk_rank, file);
-        atk |= sq;
-        if (occ & sq) {
-            break;
-        }
-    }
-    for (enum rank_index walk_rank = rank-1; walk_rank <= RANK_INDEX_8; --walk_rank) {
-        const bitboard sq = SQ_MASK_FROM_RF(walk_rank, file);
-        atk |= sq;
-        if (occ & sq) {
-            break;
-        }
-    }
-    for (enum file_index walk_file = file+1; walk_file <= FILE_INDEX_H; ++walk_file) {
-        const bitboard sq = SQ_MASK_FROM_RF(rank, walk_file);
-        atk |= sq;
-        if (occ & sq) {
-            break;
-        }
-    }
-    for (enum file_index walk_file = file-1; walk_file <= FILE_INDEX_H; --walk_file) {
-        const bitboard sq = SQ_MASK_FROM_RF(rank, walk_file);
-        atk |= sq;
-        if (occ & sq) {
-            break;
-        }
-    }
-    
-    return atk;
-}
 
 /* gets the next number with the same bitcount, unless it overflows, in which
  * it returns the first number with popcount+1 */
@@ -116,21 +20,6 @@ uint64_t next_magic(uint64_t seed) {
     return seed;
 }
 
-uint64_t rand64() {
-    union {
-        uint64_t v;
-        uint16_t vs[4];
-    } x = {
-        .vs = {
-            (uint16_t)rand(),
-            (uint16_t)rand(),
-            (uint16_t)rand(),
-            (uint16_t)rand(),
-        }
-    };
-
-    return x.v;
-}
 
 int main()
 {
@@ -145,6 +34,8 @@ int main()
 
     index bishop_relevant_bits[9] = {0};
     size_t bishop_relevant_bits_count = 0;
+
+    bitboard between_lookup[SQ_INDEX_COUNT][SQ_INDEX_COUNT];
 
     for (enum square_index sq_index = SQ_INDEX_BEGIN; sq_index < SQ_INDEX_COUNT; ++sq_index) {
         enum file_index file = index_to_file(sq_index);
@@ -183,7 +74,7 @@ int main()
                         occ |= ((test >> i) & 1ULL) << rook_relevant_bits[i];
                     }
 
-                    atk = rook_attacks_from_index_slow(sq_index, occ);
+                    atk = rook_attacks_from_index(sq_index, occ);
 
                     const size_t hash = ((occ * magic) >> (64ULL-12));
 
@@ -239,7 +130,7 @@ int main()
                         occ |= ((test >> i) & 1ULL) << bishop_relevant_bits[i];
                     }
 
-                    atk = bishop_attacks_from_index_slow(sq_index, occ);
+                    atk = bishop_attacks_from_index(sq_index, occ);
 
                     const size_t hash = ((occ * magic) >> (64ULL-9));
 
@@ -256,6 +147,16 @@ int main()
                 break;
 
     next_bishop_magic:
+            }
+        }
+
+        /* BETWEEN TABLE
+         * ===================== */
+        {
+            for (enum square_index i = SQ_INDEX_BEGIN; i < SQ_INDEX_COUNT; ++i) {
+                for (enum square_index j = SQ_INDEX_BEGIN; j < SQ_INDEX_COUNT; ++j) {
+                    between_lookup[i][j] = between_mask(i, j);
+                }
             }
         }
    }
@@ -330,6 +231,24 @@ int main()
             fprintf(f, "[%s] = {\n", square_index_str[sq]);
             for (size_t i = 0; i < sizeof bishop_attacks[sq] / sizeof *bishop_attacks[sq]; i++) {
                 fprintf(f, "0x%016"BITBOARD_FMT_X"ULL, \n", bishop_attacks[sq][i]);
+            }
+            fprintf(f, "\n},\n");
+        }
+        fprintf(f,"};\n");
+    }
+
+    { /* between table */
+        FILE* f = fopen("between_lookup.h", "w");
+        if (!f) {
+            perror("fopen");
+            exit(EXIT_FAILURE);
+        }
+
+        fprintf(f, "static const bitboard between_lookup[SQ_INDEX_COUNT][SQ_INDEX_COUNT] = {\n");
+        for (enum square_index i = SQ_INDEX_BEGIN; i < SQ_INDEX_COUNT; ++i) {
+            fprintf(f, "[%s] = {\n", square_index_str[i]);
+            for (enum square_index j = SQ_INDEX_BEGIN; j < SQ_INDEX_COUNT; ++j) {
+                fprintf(f, "0x%016"BITBOARD_FMT_X"ULL, \n", between_lookup[i][j]);
             }
             fprintf(f, "\n},\n");
         }

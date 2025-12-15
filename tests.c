@@ -357,9 +357,11 @@ static void test_bishops(void)
     printf("\nAll bishop_attacks_from_index tests passed.\n");
 }
 
-
 int main()
 {
+
+    printf("sizeof board: %zu\n", sizeof (struct board));
+
     test_rooks();
     test_bishops();
 
@@ -369,37 +371,61 @@ int main()
     fprintf(stdout, "\033[0m\n"); /* reset background color */
     struct board board = BOARD_INITIAL;
 
-    enum player player = PLAYER_WHITE;
-    enum square_index pieces[SQ_INDEX_COUNT] = {0};
-    struct move moves[MOVE_MAX] = {0};
-    for (int i = 0; i < 40; ++i) {
-        board_print_threats(&board, stdout, player);
+    //board_load_fen_unsafe(&board, "1n1q1rk1/r1p2P2/1p1pp2p/pB2P3/2P5/PPN5/6b1/3QK1NR b - - 0 1");
+    //board_print_fen(&board, stdout);
+    board_print(&board.pos, NULL, stdout);
 
-        const size_t piece_count = all_player_pieces(&board, player, pieces);
+    struct move moves[MOVE_MAX];
 
-        if (piece_count == 0) {
-            printf("no pieces for %s, aborting\n", player_str[player]);
-            break;
-        }
-
-        size_t move_count;
-        for (size_t i = 0; i < piece_count; ++i) {
-            move_count = all_moves_from(&board, player, pieces[i], moves);
-
-            if (move_count > 0) {
-                board_move_piece(&board, player, moves[0]);
-                break;
-            }
-        }
+    for (int turn = 0; turn < 200; ++turn) {
+        size_t move_count = 0;
+        all_moves(&board.pos, board.pos.player, &move_count, moves);
 
         if (move_count == 0) {
-            printf("no moves for %s, aborting\n", player_str[player]);
+            printf("no moves for %s, aborting\n", player_str[board.pos.player]);
+            board_print_threats(&board.pos, stdout, NULL);
+            board.pos.player = opposite_player(board.pos.player);
+            board_print_threats(&board.pos, stdout, NULL);
             break;
         }
         
-        player = opposite_player(player);
+        //struct move move = moves[0];
+        struct move move = search(&board, board.pos.player, 6);
 
-        usleep(300000);
+        printf("move %d: {\n"
+               "    .from = %s, (%s)\n"
+               "    .to = %s,\n"
+               "    .mask = ",
+               turn,
+               square_index_display[move.from],
+               piece_str[board.mailbox[move.from]],
+               square_index_display[move.to]
+               );
+        if (move.attr & MATTR_CAPTURE) printf("MATTR_CAPTURE ");
+        if (move.attr & MATTR_PROMOTE) printf("MATTR_PROMOTE ");
+        printf("\n}\n");
+
+        enum move_result const r = board_move_2(&board, move);
+
+#if 1
+        board_print(&board.pos, &move, stdout);
+#endif
+
+        if (r == MR_STALEMATE) {
+            printf("stalemate\n");
+            break;
+        }
+
+        if (board.pos.pieces[PLAYER_WHITE][PIECE_KING] == 0ULL) {
+            printf("white king gone!!\n");
+            exit(1);
+        }
+        if (board.pos.pieces[PLAYER_BLACK][PIECE_KING] == 0ULL) {
+            printf("black king gone!!\n");
+            exit(1);
+        }
+
+        //usleep(1000000);
     }
     
     return EXIT_SUCCESS;
