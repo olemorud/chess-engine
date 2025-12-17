@@ -9,8 +9,9 @@
 #include <stdlib.h>
 #include <inttypes.h>
 
+#define index string_index
 #include <string.h>
-
+#undef index
 
 static struct {
     /* all globals are zero by default in C */
@@ -350,14 +351,14 @@ static char const* player_str[PLAYER_COUNT] = {
  *  Piece
  *  ===========
  * */
-/*    enum          value       white char   white unicode   black char    black unicode  */
+/*    enum          value   white char   white unicode   black char    black unicode  */
 #define PIECES \
-    X(PIECE_PAWN,     1.0,             'P',         0x2659,         'p',          0x265F) \
-    X(PIECE_KING,     5.0,             'K',         0x2654,         'k',          0x265A) \
-    X(PIECE_QUEEN,    9.0,             'Q',         0x2655,         'q',          0x265B) \
-    X(PIECE_BISHOP,   3.0,             'B',         0x2657,         'b',          0x265D) \
-    X(PIECE_ROOK,     5.0,             'R',         0x2656,         'r',          0x265C) \
-    X(PIECE_KNIGHT,   3.0,             'N',         0x2658,         'n',          0x265E)
+    X(PIECE_PAWN,     1.0,         'P',         0x2659,         'p',          0x265F) \
+    X(PIECE_KING,     5.0,         'K',         0x2654,         'k',          0x265A) \
+    X(PIECE_QUEEN,    9.0,         'Q',         0x2655,         'q',          0x265B) \
+    X(PIECE_BISHOP,   3.0,         'B',         0x2657,         'b',          0x265D) \
+    X(PIECE_ROOK,     5.0,         'R',         0x2656,         'r',          0x265C) \
+    X(PIECE_KNIGHT,   3.0,         'N',         0x2658,         'n',          0x265E)
 
 enum piece : uint8_t {
 #define X(e, v, wc, wu, bc, bu) e,
@@ -669,6 +670,7 @@ static bitboard bishop_attacks_from_index(enum square_index sq, bitboard occ)
    - `mbb_bishop[SQ_INDEX_COUNT]`
    - `bitboard bishop_attacks[SQ_INDEX_COUNT][1<<9ULL] */
 #include "mbb_bishop.h"
+    assert(sq < SQ_INDEX_COUNT);
     struct magic const m = mbb_bishop[sq];
     occ &= m.mask;
     occ *= m.magic;
@@ -864,29 +866,26 @@ struct move {
     index   from;
     index   to;
     uint8_t attr;
-    #define APPEAL_MAX 127
-    int8_t  appeal;
+    #define APPEAL_MAX UINT8_MAX
+    uint8_t  appeal;
 };
-
-enum  {
-    SO_ATTR_CHECK = 1<<0,
-};
+_Static_assert(sizeof(struct move) == 4,
+        "this static assert is here to check when sizeof(move) changes");
 
 struct search_option {
-    /* TODO: optimize field order */
+    /* TODO: optimize order of fields and size */
     double      score;
     struct move move;
     uint64_t    hash;
-    int8_t      depth;
-    uint8_t     init;
-    enum tt_flag {TT_EXACT, TT_LOWER, TT_UPPER} flag;
-    uint16_t attr;
+    uint8_t     init : 1;
+    enum tt_flag {TT_EXACT, TT_LOWER, TT_UPPER} flag : 3;
+    int8_t      depth : 4;
 };
 
 #define TT_ADDRESS_BITS 24
 #define TT_ENTRIES (1ULL<<TT_ADDRESS_BITS)
 struct tt {
-    struct search_option* entries; /* must be malloc'ed or mmap'ed */
+    struct search_option* entries; /* must be initialized somewhere */
 };
 
 
@@ -929,12 +928,12 @@ static void move_compute_appeal(struct move*      m,
     /* MVV-LVA: https://www.chessprogramming.org/MVV-LVA */
     enum piece const atk = mailbox[m->from];
 
-    int8_t n = 1;
+    uint8_t n = 1;
     if (SQ_MASK_FROM_INDEX(m->to) & pos->occupied[them]) {
-        n += (int8_t)piece_value[mailbox[m->to]];
+        n += (uint8_t)piece_value[mailbox[m->to]];
     }
 
-    m->appeal = 16*(int8_t)n - (int8_t)piece_value[atk];
+    m->appeal = 16*n - (uint8_t)piece_value[atk];
 }
 
 #define BOARD_INITIAL (struct board) {                    \
@@ -1007,13 +1006,13 @@ static void move_compute_appeal(struct move*      m,
     .hist = {0},                                          \
 }
 
-static void board_print_fen(struct board const* b, FILE* out)
+static void board_print_fen(struct pos const* pos, FILE* out)
 {
     int buf[8][8] = {0};
 
     for (enum player player = PLAYER_BEGIN; player < PLAYER_COUNT; ++player) {
         for (enum piece piece = PIECE_BEGIN; piece < PIECE_COUNT; ++piece) {
-            bitboard x = b->pos.pieces[player][piece];
+            bitboard x = pos->pieces[player][piece];
 
             for (index i = 7; i < 8; i--) {
                 for (index j = 0; j < 8; ++j) {
@@ -1045,22 +1044,22 @@ static void board_print_fen(struct board const* b, FILE* out)
             fprintf(out, "/");
     }
 
-    fprintf(out, " %c ", b->pos.player == PLAYER_WHITE ? 'w' : 'b');
+    fprintf(out, " %c ", pos->player == PLAYER_WHITE ? 'w' : 'b');
 
     bool any_castle = false;
-    if (!b->pos.castling_illegal[PLAYER_WHITE][CASTLE_KINGSIDE]) {
+    if (!pos->castling_illegal[PLAYER_WHITE][CASTLE_KINGSIDE]) {
         fprintf(out, "K");
         any_castle = true;
     }
-    if (!b->pos.castling_illegal[PLAYER_WHITE][CASTLE_QUEENSIDE]) {
+    if (!pos->castling_illegal[PLAYER_WHITE][CASTLE_QUEENSIDE]) {
         fprintf(out, "Q");
         any_castle = true;
     }
-    if (!b->pos.castling_illegal[PLAYER_BLACK][CASTLE_KINGSIDE]) {
+    if (!pos->castling_illegal[PLAYER_BLACK][CASTLE_KINGSIDE]) {
         fprintf(out, "k");
         any_castle = true;
     }
-    if (!b->pos.castling_illegal[PLAYER_BLACK][CASTLE_QUEENSIDE]) {
+    if (!pos->castling_illegal[PLAYER_BLACK][CASTLE_QUEENSIDE]) {
         fprintf(out, "q");
         any_castle = true;
     }
@@ -1068,7 +1067,7 @@ static void board_print_fen(struct board const* b, FILE* out)
         fprintf(out, "-");
     }
 
-    if (b->pos.ep_targets) {
+    if (pos->ep_targets) {
         /* should be ep target square in algebraic notation */
         fprintf(stderr, "not implemented: fen with en passent squares\n");
         fprintf(out, "<TODO>");
@@ -1076,8 +1075,8 @@ static void board_print_fen(struct board const* b, FILE* out)
         fprintf(out, " -");
     }
 
-    fprintf(out, " %d", b->pos.halfmoves);
-    fprintf(out, " %d", b->pos.fullmoves);
+    fprintf(out, " %d", pos->halfmoves);
+    fprintf(out, " %d", pos->fullmoves);
 
     fprintf(out, "\n");
 }
@@ -1301,40 +1300,6 @@ static bitboard attacks_to(struct pos const* pos,
           & ~pretend_occupied;
 }
 
-static bitboard attacks_to_king(struct pos const* pos,
-                                bitboard target_square,
-                                bitboard pretend_occupied,
-                                bitboard pretend_empty)
-{
-    bitboard const occ_orig = pos->occupied[PLAYER_WHITE] | pos->occupied[PLAYER_BLACK];
-    bitboard const occ = (occ_orig & ~pretend_empty) | pretend_occupied;
-
-    bitboard const* pw = pos->pieces[PLAYER_WHITE];
-    bitboard const* pb = pos->pieces[PLAYER_BLACK];
-
-    bitboard const wps = pw[PIECE_PAWN];
-
-    bitboard const bps = pb[PIECE_PAWN];
-
-    bitboard const ns = (pw[PIECE_KNIGHT] |  pb[PIECE_KNIGHT]);
-    bitboard const qs = (pw[PIECE_QUEEN] |  pb[PIECE_QUEEN]);
-
-    bitboard const qrs = (pw[PIECE_ROOK]   |  pb[PIECE_ROOK]   |  qs) ;
-    bitboard const qbs = (pw[PIECE_BISHOP] |  pb[PIECE_BISHOP] |  qs) ;
-
-    enum square_index target_index = bitboard_lsb(target_square);
-
-    return ((bps & pawn_attacks_white(target_square))
-          | (wps & pawn_attacks_black(target_square))
-          | (ns & knight_attacks(target_square))
-          | (qbs & bishop_attacks_from_index(target_index, occ))
-          | (qrs & rook_attacks_from_index(target_index, occ)))
-          & ~pretend_occupied;
-}
-
-_Static_assert(sizeof(struct move) == 4,
-        "this static assert is here to check when sizeof(move) changes");
-
 #define MOVE_CASTLE_KINGSIDE_WHITE (struct move) \
     {.from = SQ_INDEX_E1, .to = SQ_INDEX_G1, .attr = MATTR_CASTLE_KINGSIDE}
 
@@ -1475,8 +1440,7 @@ static void all_moves(struct pos const* restrict pos,
     assert(myking);
 
     enum square_index const myking_index = bitboard_lsb(myking);
-    bitboard const attackers = attacks_to_king(pos, myking, 0ULL, 0ULL) & ~pos->occupied[us];
-
+    bitboard const attackers = attacks_to(pos, myking, 0ULL, 0ULL) & ~pos->occupied[us];
 
     bitboard allowed = ~0ULL;
 
@@ -1629,6 +1593,8 @@ enum move_result {
     MR_CHECKMATE,
 };
 
+static void board_print(const struct pos* pos, struct move* move, FILE* out);
+
 /* does not check validity */
 static enum move_result board_move(struct pos* restrict     pos,
                                    struct history* restrict hist,
@@ -1637,6 +1603,20 @@ static enum move_result board_move(struct pos* restrict     pos,
 {
     enum player const us   = pos->player;
     enum player const them = opposite_player(us);
+
+#ifndef NDEBUG
+    if (SQ_MASK_FROM_INDEX(move.to) & pos->pieces[them][PIECE_KING]) {
+        fprintf(stderr, "fatal error: king capture\n");
+        board_print_fen(pos, stderr);
+        board_print(pos, &move, stderr);
+        for (enum piece p = PIECE_BEGIN; p < PIECE_COUNT; ++p) {
+            if (pos->pieces[us][p] & SQ_MASK_FROM_INDEX(move.from)) {
+                fprintf(stderr, "%s found on %s\n", piece_str[p], square_index_display[move.from]);
+            }
+        }
+        __builtin_trap();
+    }
+#endif
 
     enum piece const from_piece = mailbox[move.from];
     enum piece const to_piece = mailbox[move.to];
@@ -1681,6 +1661,7 @@ static enum move_result board_move(struct pos* restrict     pos,
             pos->pieces[owner][piece] |= x; \
             pos->occupied[owner] |= x; \
             pos->hash = tt_hash_update(pos->hash, at, owner, piece); \
+            mailbox[at] = piece; \
             pos->halfmoves = 0; \
             hist->length = 0; \
         } while (0)
@@ -1785,7 +1766,7 @@ static enum move_result board_move(struct pos* restrict     pos,
         return MR_STALEMATE;
     }
 
-    if (attacks_to_king(pos, pos->pieces[them][PIECE_KING], 0ULL, 0ULL) & ~pos->occupied[them]) {
+    if (attacks_to(pos, pos->pieces[them][PIECE_KING], 0ULL, 0ULL) & ~pos->occupied[them]) {
         return MR_CHECK;
     } else {
         return MR_NORMAL;
@@ -1909,7 +1890,7 @@ double quiesce(struct pos const* pos,
     while (move_count) {
         struct move m = moves_linear_search(moves, &move_count);
 
-        if ((m.attr & MATTR_CAPTURE) == 0) {
+        if ((m.attr & MATTR_CAPTURE) == 0ULL) {
             continue;
         }
 
@@ -2010,11 +1991,14 @@ struct search_option alphabeta_search(struct pos const* pos,
     all_moves(pos, us, &move_count, moves);
 
     if (move_count == 0) {
-        /* TODO: detect stalemate */
-
         /* TODO: reusing mate distances correctly needs ply normalization */
+        /* TODO: detect stalemate */
+        double score = 0;
+        if (attacks_to(pos, pos->pieces[us][PIECE_KING], 0ULL, 0ULL) != 0ULL) {
+            score = -(999.0 + (double)depth);
+        }
         return (struct search_option) {
-            .score  = -(999.0 + (double)depth),
+            .score  = score,
             .move   = (struct move){0},
             .depth  = depth,
             .hash   = pos->hash,
@@ -2039,7 +2023,6 @@ struct search_option alphabeta_search(struct pos const* pos,
 
     double best_score = -1e300;
     struct move best_move = moves[0];
-
 
     while (move_count) {
         struct move m = moves_linear_search(moves, &move_count);
@@ -2123,7 +2106,7 @@ struct move search(struct board* b, enum player us, int8_t max_depth)
 #define SCORE_INF 1e80
 
     for (int8_t d = 1; d <= max_depth; ++d) {
-        double window = 0.5; /* half a pawn */
+        double window = 0.5;
         double alpha = score - window;
         double beta = score + window;
 
@@ -2184,7 +2167,7 @@ static void board_print(const struct pos* pos, struct move* move, FILE* out)
         for (index j = 0; j < 8; ++j) {
             index const n = INDEX_FROM_RF(i,j);
             if (move && n == move->from) {
-                fprintf(out, "\033[%d;%dm", 30, 44); /* 44: blue*/
+                fprintf(out, "\033[%d;%dm", 30, 104); /* 44: blue*/
             } else if (move && n == move->to) {
                 fprintf(out, "\033[%d;%dm", 30, 44); /* 104: bright blue*/
             } else {

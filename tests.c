@@ -205,15 +205,15 @@ static void print_bishop_test(const char *label,
                               bitboard all_occ,
                               bitboard own_occ)
 {
-    printf("\n%s\n", label);
-    printf("All occ:\n");
-    bitboard_print(all_occ, stdout);
-    printf("Own occ:\n");
-    bitboard_print(own_occ, stdout);
+    fprintf(stderr, "\n%s\n", label);
+    fprintf(stderr, "All occ:\n");
+    bitboard_print(all_occ, stderr);
+    fprintf(stderr, "Own occ:\n");
+    bitboard_print(own_occ, stderr);
 
     const bitboard attacks = bishop_attacks_from_index(sq, all_occ) & ~own_occ;
-    printf("Bishop attacks:\n");
-    bitboard_print(attacks, stdout);
+    fprintf(stderr, "Bishop attacks:\n");
+    bitboard_print(attacks, stderr);
 }
 
 static void test_bishops(void)
@@ -354,6 +354,34 @@ static void test_bishops(void)
         assert(attacks == expected);
     }
 
+    /* Test 6: Bishop at H8, no occupancy */
+    {
+        const enum square_index sq = SQ_INDEX_H8;
+        const bitboard enemies     = 0ULL;
+        const bitboard all_occ     = 0ULL;
+        const bitboard own_occ     = SQ_MASK_FROM_INDEX(sq);
+
+        /*
+         * From D4:
+         *  NE: E5, then friendly F6 (stop; F6 not included)
+         *  SW: C3, B2 (enemy, included, then stop)
+         *  NW: C5, B6, A7
+         *  SE: E3, F2, G1
+         *  Bishop at F4 is irrelevant; it does not sit on a diagonal from D4.
+         */
+        bitboard expected = 0ULL;
+		expected = SQ_MASK_G7 | SQ_MASK_F6 | SQ_MASK_E5 | SQ_MASK_D4 |
+			SQ_MASK_C3 | SQ_MASK_B2 | SQ_MASK_A1;
+
+        print_bishop_test("Bishop Test 6: H8, no occupancy", sq, all_occ, own_occ);
+
+        const bitboard attacks = bishop_attacks_from_index(sq, all_occ) & ~own_occ;
+		if (attacks != expected) {
+			bitboard_print(attacks, stderr);
+		}
+        assert(attacks == expected);
+    }
+
     printf("\nAll bishop_attacks_from_index tests passed.\n");
 }
 
@@ -365,7 +393,7 @@ int main()
     printf("sizeof mailbox: %zu\n", sizeof (struct board){0}.mailbox);
     printf("sizeof tt:      %zu\n", sizeof (struct tt));
 
-#if 0
+#if 1
     test_rooks();
     test_bishops();
 #endif
@@ -377,8 +405,8 @@ int main()
     struct board board = BOARD_INITIAL;
 
     //board_load_fen_unsafe(&board, "1n1q1rk1/r1p2P2/1p1pp2p/pB2P3/2P5/PPN5/6b1/3QK1NR b - - 0 1");
-    board_load_fen_unsafe(&board, "5R2/7k/P7/6pp/3B4/1PPK2bP/4r3/8 b - - 3 57");
-    board_print_fen(&board, stdout);
+    //board_load_fen_unsafe(&board, "5R2/7k/P7/6pp/3B4/1PPK2bP/4r3/8 b - - 3 57");
+    board_print_fen(&board.pos, stdout);
     board_print(&board.pos, NULL, stdout);
 
     struct move moves[MOVE_MAX];
@@ -396,7 +424,7 @@ int main()
         }
         
         //struct move move = moves[0];
-        struct move move = search(&board, board.pos.player, 7);
+        struct move move = search(&board, board.pos.player, 8);
 
         printf("move %d: {\n"
                "    .from = %s, (%s)\n"
@@ -414,7 +442,7 @@ int main()
         enum move_result const r = board_move_2(&board, move);
 
 #if 1
-        board_print_fen(&board, stdout);
+        board_print_fen(&board.pos, stdout);
         print_stats(stdout);
         board_print(&board.pos, &move, stdout);
 #endif
