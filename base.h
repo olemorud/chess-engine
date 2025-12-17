@@ -12,6 +12,21 @@
 #include <string.h>
 
 
+static struct {
+    /* all globals are zero by default in C */
+    uint64_t tt_collisions;
+    uint64_t tt_hits;
+    uint64_t tt_probes;
+} global_stats;
+
+static void print_stats(FILE* out)
+{
+    fprintf(out, "Stats:\n");
+    fprintf(out, "tt collisions: %lu\n", global_stats.tt_collisions);
+    fprintf(out, "tt hits:       %lu\n", global_stats.tt_hits);
+    fprintf(out, "tt probes:     %lu\n", global_stats.tt_probes);
+}
+
 /* BIT MANIPULATION
  * ================ */
 
@@ -81,6 +96,11 @@ typedef uint8_t index;
 #define RANK_SHIFT_DOWN(b, n)  ((b) >> ((index)(n)*8U))
 #define FILE_SHIFT_LEFT(b, n)  ((b) >> ((index)(n)*1U))
 #define FILE_SHIFT_RIGHT(b, n) ((b) << ((index)(n)*1U))
+
+#define INDEX_SHIFT_UP(i, n)    ((i) + ((index)(n)*8U))
+#define INDEX_SHIFT_DOWN(i, n)  ((i) - ((index)(n)*8U))
+#define INDEX_SHIFT_LEFT(i, n)  ((i) - ((index)(n)*1U))
+#define INDEX_SHIFT_RIGHT(i, n) ((i) + ((index)(n)*1U))
 
 #define FILE_MASK(n) FILE_SHIFT_RIGHT((bitboard)0x0101010101010101ULL, n)
 #define RANK_MASK(n) RANK_SHIFT_UP((bitboard)0x00000000000000FFULL, n)
@@ -801,7 +821,6 @@ static bitboard piece_attacks(enum piece  piece,
 
 #ifndef NDEBUG
         default: {
-            assert(!"unreachable");
             __builtin_trap();
             __builtin_unreachable();
         } break;
@@ -833,24 +852,41 @@ enum castle_direction {
     CASTLE_COUNT,
 };
 
+enum {
+    MATTR_CAPTURE          = 1<<0,
+    MATTR_PROMOTE          = 1<<1,
+    MATTR_CHECK            = 1<<2,
+    MATTR_CASTLE_KINGSIDE  = 1<<3,
+    MATTR_CASTLE_QUEENSIDE = 1<<4,
+};
 
-/* transposition table */
 struct move {
-    index        from : 8;
-    index        to   : 8;
-    unsigned int attr : 8;
+    index   from;
+    index   to;
+    uint8_t attr;
+    #define APPEAL_MAX 127
+    int8_t  appeal;
+};
+
+enum  {
+    SO_ATTR_CHECK = 1<<0,
 };
 
 struct search_option {
-    double score;
+    /* TODO: optimize field order */
+    double      score;
     struct move move;
-    bool set;
+    uint64_t    hash;
+    int8_t      depth;
+    uint8_t     init;
+    enum tt_flag {TT_EXACT, TT_LOWER, TT_UPPER} flag;
+    uint16_t attr;
 };
 
-#define TT_ADDRESS_BITS 12
-#define TT_SIZE (1ULL<<TT_ADDRESS_BITS)
+#define TT_ADDRESS_BITS 24
+#define TT_ENTRIES (1ULL<<TT_ADDRESS_BITS)
 struct tt {
-    struct search_option entries[TT_SIZE];
+    struct search_option* entries; /* must be malloc'ed or mmap'ed */
 };
 
 
@@ -861,6 +897,7 @@ struct board {
         bool castling_illegal[PLAYER_COUNT][CASTLE_COUNT];
         bitboard ep_targets;
         bitboard occupied[PLAYER_COUNT];
+
         int halfmoves; /* FIXME: this duplicates the hist.length value */
         int fullmoves;
         uint64_t hash;
@@ -882,6 +919,23 @@ struct board {
      * */
     enum piece mailbox[SQ_INDEX_COUNT];
 };
+
+static void move_compute_appeal(struct move*      m,
+                                struct pos const* pos,
+                                enum player       us,
+                                enum piece        mailbox[restrict static SQ_INDEX_COUNT])
+{
+    enum player them = opposite_player(us);
+    /* MVV-LVA: https://www.chessprogramming.org/MVV-LVA */
+    enum piece const atk = mailbox[m->from];
+
+    int8_t n = 1;
+    if (SQ_MASK_FROM_INDEX(m->to) & pos->occupied[them]) {
+        n += (int8_t)piece_value[mailbox[m->to]];
+    }
+
+    m->appeal = 16*(int8_t)n - (int8_t)piece_value[atk];
+}
 
 #define BOARD_INITIAL (struct board) {                    \
     .pos = {                                              \
@@ -977,6 +1031,7 @@ static void board_print_fen(struct board const* b, FILE* out)
             if (buf[i][j]) {
                 if (consequtive_empty) {
                     fprintf(out, "%d", consequtive_empty);
+                    consequtive_empty = 0;
                 }
                 fprintf(out, "%lc", buf[i][j]);
             } else {
@@ -1016,7 +1071,7 @@ static void board_print_fen(struct board const* b, FILE* out)
     if (b->pos.ep_targets) {
         /* should be ep target square in algebraic notation */
         fprintf(stderr, "not implemented: fen with en passent squares\n");
-        abort();
+        fprintf(out, "<TODO>");
     } else {
         fprintf(out, " -");
     }
@@ -1039,7 +1094,7 @@ static bool board_load_fen_unsafe(struct board* b, char const* fen_str)
         .i = 0,
         .len = strlen(fen_str),
     };
-#define BUF_GETCHAR(x) (assert(x.i < x.len), x.buf[x.i++])
+#define BUF_GETCHAR(x) (fprintf(stderr, "[%c]", x.buf[x.i]), assert(x.i < x.len), x.buf[x.i++])
 
     memset(&b->pos, 0, sizeof b->pos);
     b->pos.hash = ~0ULL;
@@ -1048,6 +1103,9 @@ static bool board_load_fen_unsafe(struct board* b, char const* fen_str)
         for (enum file_index fi = FILE_INDEX_BEGIN; fi < FILE_INDEX_COUNT; ++fi) {
             char const ch = BUF_GETCHAR(fen);
             if (isdigit(ch)) {
+                if (ch == '0') {
+                    abort();
+                }
                 fi += ch - '0' - 1;
             } else {
                 struct piece_player const p = piece_and_player_from_char[(uint8_t)ch];
@@ -1076,20 +1134,19 @@ static bool board_load_fen_unsafe(struct board* b, char const* fen_str)
         if (ch != ' ') {
             abort();
         }
+        b->pos.castling_illegal[PLAYER_WHITE][CASTLE_KINGSIDE] = true;
+        b->pos.castling_illegal[PLAYER_WHITE][CASTLE_QUEENSIDE] = true;
+        b->pos.castling_illegal[PLAYER_BLACK][CASTLE_KINGSIDE] = true;
+        b->pos.castling_illegal[PLAYER_BLACK][CASTLE_QUEENSIDE] = true;
         do {
             ch = BUF_GETCHAR(fen);
             switch (ch) {
-                case 'K': b->pos.castling_illegal[PLAYER_WHITE][CASTLE_KINGSIDE] = true;  break;
-                case 'Q': b->pos.castling_illegal[PLAYER_WHITE][CASTLE_QUEENSIDE] = true; break;
-                case 'k': b->pos.castling_illegal[PLAYER_BLACK][CASTLE_KINGSIDE] = true;  break;
-                case 'q': b->pos.castling_illegal[PLAYER_BLACK][CASTLE_QUEENSIDE] = true; break;
+                case 'K': b->pos.castling_illegal[PLAYER_WHITE][CASTLE_KINGSIDE] = false;  break;
+                case 'Q': b->pos.castling_illegal[PLAYER_WHITE][CASTLE_QUEENSIDE] = false; break;
+                case 'k': b->pos.castling_illegal[PLAYER_BLACK][CASTLE_KINGSIDE] = false;  break;
+                case 'q': b->pos.castling_illegal[PLAYER_BLACK][CASTLE_QUEENSIDE] = false; break;
                 case ' ': break;
-                case '-': {
-                    b->pos.castling_illegal[PLAYER_WHITE][CASTLE_KINGSIDE] = true;
-                    b->pos.castling_illegal[PLAYER_WHITE][CASTLE_QUEENSIDE] = true;
-                    b->pos.castling_illegal[PLAYER_BLACK][CASTLE_KINGSIDE] = true;
-                    b->pos.castling_illegal[PLAYER_BLACK][CASTLE_QUEENSIDE] = true;
-                } break;
+                case '-': break;
                 default: {
                     fprintf(stderr, "unexpected char '%c'\n", ch); 
                     abort();
@@ -1275,14 +1332,6 @@ static bitboard attacks_to_king(struct pos const* pos,
           & ~pretend_occupied;
 }
 
-enum {
-    MATTR_CAPTURE          = 1<<0,
-    MATTR_PROMOTE          = 1<<1,
-    /*MATTR_CHECK       = 1<<2,*/
-    MATTR_CASTLE_KINGSIDE  = 1<<3,
-    MATTR_CASTLE_QUEENSIDE = 1<<4,
-};
-
 _Static_assert(sizeof(struct move) == 4,
         "this static assert is here to check when sizeof(move) changes");
 
@@ -1298,7 +1347,7 @@ _Static_assert(sizeof(struct move) == 4,
 #define MOVE_CASTLE_QUEENSIDE_BLACK \
     (struct move){.from = SQ_INDEX_E8, .to = SQ_INDEX_C8, .attr = MATTR_CASTLE_QUEENSIDE}
 
-struct move move_make(struct pos const* pos, enum piece piece, index from, index to, uint16_t add_attr)
+struct move move_make(struct pos const* pos, enum piece piece, index from, index to, uint8_t add_attr)
 {
     enum player const us = pos->player;
     enum player const them = opposite_player(us);
@@ -1306,17 +1355,18 @@ struct move move_make(struct pos const* pos, enum piece piece, index from, index
     bitboard const tomask = SQ_MASK_FROM_INDEX(to);
     bitboard const finishline = (us == PLAYER_WHITE ? RANK_MASK_8 : RANK_MASK_1);
 
-    uint16_t attr = 0ULL;
-#define MASK_IF32(x) ((~(uint32_t)0U) + (uint32_t)!(x))
-    attr |= MATTR_CAPTURE & MASK_IF32(tomask & their_occ);
-    attr |= MATTR_PROMOTE & MASK_IF32((piece == PIECE_PAWN) && (tomask & finishline));
+    uint8_t attr = 0ULL;
+#define MASK_IF8(x) ((~(uint8_t)0U) + (uint8_t)!(x))
+    attr |= MATTR_CAPTURE & MASK_IF8(tomask & their_occ);
+    attr |= MATTR_CAPTURE & MASK_IF8((piece == PIECE_PAWN) && tomask & pos->ep_targets);
+    attr |= MATTR_PROMOTE & MASK_IF8((piece == PIECE_PAWN) && (tomask & finishline));
     attr |= add_attr;
-#undef MASK_IF32
+#undef MASK_IF8
 
     return (struct move){.from = from, .to = to, .attr = attr};
 }
 
-#define MOVE_MAX 256
+#define MOVE_MAX 128
 
 static void all_moves_from_piece(struct pos const* restrict pos,
                                  enum piece                 piece,
@@ -1422,10 +1472,11 @@ static void all_moves(struct pos const* restrict pos,
 {
     *out_count = 0ULL;
     bitboard const myking = pos->pieces[us][PIECE_KING];
-    enum square_index const myking_index = bitboard_lsb(myking);
-    bitboard const attackers = attacks_to(pos, myking, 0ULL, 0ULL) & ~pos->occupied[us];
-
     assert(myking);
+
+    enum square_index const myking_index = bitboard_lsb(myking);
+    bitboard const attackers = attacks_to_king(pos, myking, 0ULL, 0ULL) & ~pos->occupied[us];
+
 
     bitboard allowed = ~0ULL;
 
@@ -1442,10 +1493,10 @@ static void all_moves(struct pos const* restrict pos,
         all_moves_from_king(pos, us, myking_index, out_count, out);
     }
 
-    //if (natk >= 2) {
-    //    fprintf(stderr, "more than 2 king attackers\n");
-    //    return;
-    //}
+    if (natk >= 2) {
+        /* no other piece can fix check if the king has two attackers or more */
+        return;
+    }
 
     /* pawns */
     {
@@ -1493,222 +1544,252 @@ static void all_moves(struct pos const* restrict pos,
     }
 }
 
-static void init_zobrist(uint64_t zobrist[SQ_INDEX_COUNT][PLAYER_COUNT][PIECE_COUNT])
+struct zobrist {
+    uint64_t piece_keys[SQ_INDEX_COUNT][PLAYER_COUNT][PIECE_COUNT];
+    uint64_t ep_targets[SQ_INDEX_COUNT];
+    uint64_t castling_keys[PLAYER_COUNT][CASTLE_COUNT];
+    bool init;
+};
+
+static struct zobrist zobrist;
+
+static void init_zobrist()
 {
     for (enum square_index sq = SQ_INDEX_BEGIN; sq < SQ_INDEX_COUNT; ++sq) {
         for (enum player pl = PLAYER_BEGIN; pl < PLAYER_COUNT; ++pl) {
             for (enum piece piece = PIECE_BEGIN; piece < PIECE_COUNT; ++piece) {
-                zobrist[sq][pl][piece] = rand64();
+                zobrist.piece_keys[sq][pl][piece] = rand64();
             }
         }
+        zobrist.ep_targets[sq] = rand64();
     }
+    for (enum player pl = PLAYER_BEGIN; pl < PLAYER_COUNT; ++pl) {
+        for (enum castle_direction d = CASTLE_BEGIN; d < CASTLE_COUNT; ++d) {
+            zobrist.castling_keys[pl][d] = rand64();
+        }
+    }
+    zobrist.init = true;
 }
 
-static inline uint64_t zobrist_at(enum square_index sq, enum player pl, enum piece pc)
-{
-#if ! __has_include("zobrist_table.h")
-    /* zobrist hashing: https://en.wikipedia.org/wiki/Zobrist_hashing */
-    static uint64_t zobrist[SQ_INDEX_COUNT][PLAYER_COUNT][PIECE_COUNT];
-    static bool init;
-    if (!init) {
-        init_zobrist(zobrist);
-        init = true;
-    }
-#else
-#include "zobrist_table.h"
-#endif /* __has_include("zobrist_table.h") */
-    return zobrist[sq][pl][pc];
-}
-
-/*
- *  
- *
- * */
 static inline uint64_t tt_hash_update(uint64_t          hash,
                                       enum square_index sq,
                                       enum player       us,
                                       enum piece        piece)
 {
-    assert(zobrist_at(sq, us, piece) != 0ULL);
-    return hash ^ zobrist_at(sq, us, piece);
+    if (!zobrist.init) {
+        init_zobrist();
+    }
+    return hash ^ zobrist.piece_keys[sq][us][piece];
+}
+
+static inline uint64_t tt_hash_update_castling_rights(uint64_t              hash,
+                                                      enum player           us,
+                                                      enum castle_direction dir)
+{
+    if (!zobrist.init) {
+        init_zobrist();
+    }
+    return hash ^ zobrist.castling_keys[us][dir];
+}
+
+static inline uint64_t tt_hash_update_ep_targets(uint64_t hash, enum square_index sq)
+{
+    if (!zobrist.init) {
+        init_zobrist();
+    }
+    assert(sq < SQ_INDEX_COUNT);
+    return hash ^ zobrist.ep_targets[sq];
+}
+
+static inline uint64_t tt_hash_switch_player(uint64_t hash)
+{
+    if (!zobrist.init) {
+        init_zobrist();
+    }
+    return ~hash;
 }
 
 static inline struct search_option tt_get(struct tt const* tt, uint64_t hash)
 {
-    /* shitty bloom-filter-eque check */
-    uint64_t const addr = hash % TT_SIZE; 
+    uint64_t const addr = hash % TT_ENTRIES; 
     return tt->entries[addr];
 }
 
 static inline void tt_insert(struct tt* tt, uint64_t hash, struct search_option so)
 {
-    uint64_t const addr = hash % TT_SIZE; 
-    so.set = true;
+    uint64_t const addr = hash % TT_ENTRIES; 
+    so.init = true;
     tt->entries[addr] = so;
 }
 
-/* does not check validity */
 enum move_result {
     MR_NORMAL,
+    MR_CHECK,
     MR_STALEMATE,
     MR_CHECKMATE,
 };
+
+/* does not check validity */
 static enum move_result board_move(struct pos* restrict     pos,
                                    struct history* restrict hist,
                                    enum piece               mailbox[restrict static SQ_INDEX_COUNT],
                                    struct move              move)
 {
-
     enum player const us   = pos->player;
     enum player const them = opposite_player(us);
-    bool const w = (us == PLAYER_WHITE);
+
+    enum piece const from_piece = mailbox[move.from];
+    enum piece const to_piece = mailbox[move.to];
 
     bitboard const from_mask = SQ_MASK_FROM_INDEX(move.from);
     bitboard const to_mask   = SQ_MASK_FROM_INDEX(move.to);
-                   
-    bitboard const rook_home_q_us = w ? SQ_MASK_A1 : SQ_MASK_A8;
-    bitboard const rook_home_k_us = w ? SQ_MASK_H1 : SQ_MASK_H8;
-                   
-    bitboard const rook_home_q_them = w ? SQ_MASK_A8 : SQ_MASK_A1;
-    bitboard const rook_home_k_them = w ? SQ_MASK_H8 : SQ_MASK_H1;
 
-    enum piece const from_piece = mailbox[move.from];
+    enum square_index const krook       = (us == PLAYER_WHITE) ? SQ_INDEX_H1 : SQ_INDEX_H8;
+    enum square_index const qrook       = (us == PLAYER_WHITE) ? SQ_INDEX_A1 : SQ_INDEX_A8;
+    enum square_index const krook_to    = (us == PLAYER_WHITE) ? SQ_INDEX_F1 : SQ_INDEX_F8;
+    enum square_index const qrook_to    = (us == PLAYER_WHITE) ? SQ_INDEX_D1 : SQ_INDEX_D8;
+    enum square_index const ksq         = (us == PLAYER_WHITE) ? SQ_INDEX_E1 : SQ_INDEX_E8;
+    enum square_index const kcast_sq    = (us == PLAYER_WHITE) ? SQ_INDEX_G1 : SQ_INDEX_G8;
+    enum square_index const qcast_sq    = (us == PLAYER_WHITE) ? SQ_INDEX_C1 : SQ_INDEX_C8;
+    enum square_index const their_krook = (us != PLAYER_WHITE) ? SQ_INDEX_H1 : SQ_INDEX_H8;
+    enum square_index const their_qrook = (us != PLAYER_WHITE) ? SQ_INDEX_A1 : SQ_INDEX_A8;
 
-    bool const is_castle_ks =
-        (from_piece == PIECE_KING && ((move.from == SQ_INDEX_E1 && move.to == SQ_INDEX_G1) ||
-                                      (move.from == SQ_INDEX_E8 && move.to == SQ_INDEX_G8)));
-    bool const is_castle_qs =
-        (from_piece == PIECE_KING && ((move.from == SQ_INDEX_E1 && move.to == SQ_INDEX_C1) ||
-                                      (move.from == SQ_INDEX_E8 && move.to == SQ_INDEX_C8)));
-    bool const is_castle = is_castle_ks || is_castle_qs;
+    #define POS_MOVE(player, piece, from, to) \
+        do { \
+            bitboard const x = SQ_MASK_FROM_INDEX(from) | SQ_MASK_FROM_INDEX(to); \
+            pos->pieces[player][piece] ^= x; \
+            pos->occupied[player] ^= x; \
+            pos->hash = tt_hash_update(pos->hash, from, player, piece); \
+            pos->hash = tt_hash_update(pos->hash, to, player, piece); \
+            mailbox[to] = piece; \
+            if (piece == PIECE_PAWN) pos->halfmoves = 0; \
+        } while (0)
 
-    bool const is_capture = !!(move.to & pos->occupied[them]);
+    #define POS_REMOVE(owner, piece, at) \
+        do { \
+            bitboard const x = SQ_MASK_FROM_INDEX(at); \
+            pos->pieces[owner][piece] &= ~x; \
+            pos->occupied[owner] &= ~x; \
+            pos->hash = tt_hash_update(pos->hash, at, owner, piece); \
+            hist->length = 0; \
+            pos->halfmoves = 0; \
+        } while (0)
 
-    bitboard const ep_targets = pos->ep_targets;
+    #define POS_ADD(owner, piece, at) \
+        do { \
+            bitboard const x = SQ_MASK_FROM_INDEX(at); \
+            pos->pieces[owner][piece] |= x; \
+            pos->occupied[owner] |= x; \
+            pos->hash = tt_hash_update(pos->hash, at, owner, piece); \
+            pos->halfmoves = 0; \
+            hist->length = 0; \
+        } while (0)
+
+    bitboard const ep_targets_now = pos->ep_targets;
+    if (ep_targets_now) {
+        pos->hash = tt_hash_update_ep_targets(pos->hash, bitboard_lsb(ep_targets_now));
+    }
     pos->ep_targets = 0ULL;
 
-    /* our castling rights from moving king/rook */
-    if (from_piece == PIECE_KING) {
-        pos->castling_illegal[us][CASTLE_KINGSIDE]  = true;
-        pos->castling_illegal[us][CASTLE_QUEENSIDE] = true;
-    } else if (from_mask == rook_home_q_us) {
-        pos->castling_illegal[us][CASTLE_QUEENSIDE] = true;
-    } else if (from_mask == rook_home_k_us) {
-        pos->castling_illegal[us][CASTLE_KINGSIDE]  = true;
+    /* castle kingside, legality is checked by the caller */
+    /**/ if (from_piece == PIECE_KING && move.from == ksq && move.to == kcast_sq) {
+        POS_MOVE(us, PIECE_KING, ksq, kcast_sq);
+        POS_MOVE(us, PIECE_ROOK, krook, krook_to);
     }
-
-    /* their castling rights: any move landing on their rook home squares kills it */
-    if (to_mask == rook_home_q_them) {
-        pos->castling_illegal[them][CASTLE_QUEENSIDE] = true;
-    } else if (to_mask == rook_home_k_them) {
-        pos->castling_illegal[them][CASTLE_KINGSIDE]  = true;
+    /* castle queenside, legality is checked by the caller */
+    else if (from_piece == PIECE_KING && move.from == ksq && move.to == qcast_sq) {
+        POS_MOVE(us, PIECE_KING, ksq, qcast_sq);
+        POS_MOVE(us, PIECE_ROOK, qrook, qrook_to);
     }
+    /* regular move / capture */
+    else { 
+        POS_MOVE(us, from_piece, move.from, move.to);
+        /* capture */
+        /**/ if (to_mask & pos->occupied[them]) {
+            POS_REMOVE(them, to_piece, move.to);
+        }
+        else if (from_piece == PIECE_PAWN) {
+            bitboard const finishline = (us == PLAYER_WHITE ? RANK_MASK_8 : RANK_MASK_1);
 
-    pos->pieces[us][from_piece] &= ~from_mask;
-    pos->hash = tt_hash_update(pos->hash, move.from, us, from_piece);
-
-    /* handle captures without reading mailbox[to] (since empty is undefined) */
-    bool const is_pawn = (from_piece == PIECE_PAWN);
-    bool const is_ep   = is_pawn && ((to_mask & ep_targets) != 0ULL);
-
-    if (is_capture) {
-        if (is_ep) {
-            /* en passant captured pawn is behind the destination square */
-            bitboard const ep_capture_mask =
-                w ? RANK_SHIFT_DOWN_1(to_mask) : RANK_SHIFT_UP_1(to_mask);
-            pos->pieces[them][PIECE_PAWN] &= ~ep_capture_mask;
-            pos->hash = tt_hash_update(pos->hash, bitboard_lsb(ep_capture_mask), them, PIECE_PAWN);
-        } else {
-            /* normal capture: clear whatever enemy piece sits on to_mask */
-            for (enum piece p = PIECE_BEGIN; p < PIECE_COUNT; ++p) {
-                if (p & to_mask) {
-                    pos->pieces[them][p] &= ~to_mask;
-                    pos->hash = tt_hash_update(pos->hash, move.to, them, p);
-                }
+            /* en passent */
+            /**/ if (to_mask & ep_targets_now) {
+                enum square_index const ti =
+                    (us == PLAYER_WHITE)
+                    ? INDEX_SHIFT_DOWN(move.to, 1)
+                    : INDEX_SHIFT_UP(move.to, 1);
+                POS_REMOVE(them, PIECE_PAWN, ti);
+            }
+            /* pawn double push -> new ep_target */
+            else if (us == PLAYER_WHITE && (from_mask & RANK_MASK_2) && (to_mask & RANK_MASK_4)) {
+                pos->ep_targets |= RANK_SHIFT_UP_1(from_mask);
+                pos->hash = tt_hash_update_ep_targets(pos->hash, INDEX_SHIFT_UP(move.from, 1));
+            }
+            else if (us == PLAYER_BLACK && (from_mask & RANK_MASK_7) && (to_mask & RANK_MASK_5)) {
+                pos->ep_targets |= RANK_SHIFT_DOWN_1(from_mask);
+                pos->hash = tt_hash_update_ep_targets(pos->hash, INDEX_SHIFT_DOWN(move.from, 1));
+            }
+            else if (to_mask & finishline) {
+                /* already moved to `move.to` */
+                POS_REMOVE(us, PIECE_PAWN, move.to);
+                POS_ADD(us, PIECE_QUEEN, move.to);
             }
         }
     }
 
-    if (is_castle) {
-        bitboard const king_home = w ? SQ_MASK_E1 : SQ_MASK_E8;
-        bitboard const king_to =
-            is_castle_ks ? FILE_SHIFT_RIGHT_2(king_home) : FILE_SHIFT_LEFT_2(king_home);
-
-        bitboard const rook_from = is_castle_ks ? rook_home_k_us : rook_home_q_us;
-        bitboard const rook_to =
-            is_castle_ks ? FILE_SHIFT_LEFT_2(rook_home_k_us) : FILE_SHIFT_RIGHT_3(rook_home_q_us);
-
-        pos->pieces[us][PIECE_KING] |= king_to;
-        mailbox[move.to] = PIECE_KING;
-        pos->hash = tt_hash_update(pos->hash, bitboard_lsb(king_to), us, PIECE_KING);
-
-        pos->pieces[us][PIECE_ROOK] &= ~rook_from;
-        pos->hash = tt_hash_update(pos->hash, bitboard_lsb(rook_from), us, PIECE_ROOK);
-
-        const enum square_index rook_to_index = bitboard_lsb(rook_to);
-        pos->pieces[us][PIECE_ROOK] |= rook_to;
-        mailbox[rook_to_index] = PIECE_ROOK;
-        pos->hash = tt_hash_update(pos->hash, rook_to_index, us, PIECE_ROOK);
-    } else if (is_pawn) {
-        /* promotion must be based on destination square */
-        bitboard const finishline = w ? RANK_MASK_8 : RANK_MASK_1;
-
-        if (to_mask & finishline) {
-            pos->pieces[us][PIECE_QUEEN] |= to_mask;
-            mailbox[move.to] = PIECE_QUEEN;
-            pos->hash = tt_hash_update(pos->hash, move.to, us, PIECE_QUEEN);
-        } else {
-            pos->pieces[us][PIECE_PAWN] |= to_mask;
-            mailbox[move.to] = PIECE_PAWN;
-            pos->hash = tt_hash_update(pos->hash, move.to, us, PIECE_PAWN);
+    /* castling rights */
+    if (!pos->castling_illegal[us][CASTLE_KINGSIDE]) {
+        if (move.from == ksq || move.from == krook) {
+            pos->castling_illegal[us][CASTLE_KINGSIDE] = true;
+            pos->hash = tt_hash_update_castling_rights(pos->hash, us, CASTLE_KINGSIDE);
         }
-
-        /* double push -> set ep target */
-        bitboard const start      = w ? RANK_MASK_2 : RANK_MASK_7;
-        bitboard const doublepush = w ? RANK_MASK_4 : RANK_MASK_5;
-        if ((from_mask & start) && (to_mask & doublepush)) {
-            pos->ep_targets = w ? RANK_SHIFT_UP_1(from_mask) : RANK_SHIFT_DOWN_1(from_mask);
+    }
+    if (!pos->castling_illegal[us][CASTLE_QUEENSIDE]) {
+        if (move.from == ksq || move.from == qrook) {
+            pos->castling_illegal[us][CASTLE_QUEENSIDE] = true;
+            pos->hash = tt_hash_update_castling_rights(pos->hash, us, CASTLE_QUEENSIDE);
         }
-    } else {
-        pos->pieces[us][from_piece] |= to_mask;
-        mailbox[move.to] = from_piece;
-        pos->hash = tt_hash_update(pos->hash, move.to, us, from_piece);
     }
 
-    /* rebuild occupancy */
-    pos->occupied[PLAYER_WHITE] = 0ULL;
-    pos->occupied[PLAYER_BLACK] = 0ULL;
-    for (enum piece p = PIECE_BEGIN; p < PIECE_COUNT; ++p) {
-        pos->occupied[PLAYER_WHITE] |= pos->pieces[PLAYER_WHITE][p];
-        pos->occupied[PLAYER_BLACK] |= pos->pieces[PLAYER_BLACK][p];
+    if (move.to == their_krook) {
+        if (!pos->castling_illegal[them][CASTLE_KINGSIDE]) {
+            pos->castling_illegal[them][CASTLE_KINGSIDE] = true;
+            pos->hash = tt_hash_update_castling_rights(pos->hash, them, CASTLE_KINGSIDE);
+        }
+    }
+    if (move.to == their_qrook) {
+        if (!pos->castling_illegal[them][CASTLE_QUEENSIDE]) {
+            pos->castling_illegal[them][CASTLE_QUEENSIDE] = true;
+            pos->hash = tt_hash_update_castling_rights(pos->hash, them, CASTLE_QUEENSIDE);
+        }
     }
 
+    pos->hash = tt_hash_switch_player(pos->hash);
     pos->player = them;
+    pos->fullmoves += (pos->player == PLAYER_BLACK);
+    pos->halfmoves += 1;
 
-    /* TODO: this stalemates on just one repetition, fine for the engine but not the player */
     assert(hist->length < 4096);
     for (size_t i = 0; i < hist->length; ++i) {
         _Static_assert(sizeof *pos == sizeof hist->items[i]);
-        if (memcmp(&hist->items[i], pos, sizeof *pos) == 0) {
+        if (!memcmp(&hist->items[i].pieces, &pos->pieces, sizeof pos->pieces)
+         && !memcmp(&hist->items[i].castling_illegal, &pos->castling_illegal, sizeof pos->castling_illegal)
+         && hist->items[i].player == pos->player
+         && hist->items[i].ep_targets == pos->ep_targets)
+        {
             return MR_STALEMATE;
         }
     }
-
-    if (is_capture) {
-        hist->length = 0;
-        pos->halfmoves = 0;
-    }
     hist->items[hist->length++] = *pos;
-
-    pos->halfmoves += 1;
 
     if (pos->halfmoves > 50) {
         return MR_STALEMATE;
     }
 
-    pos->fullmoves += (pos->player == PLAYER_BLACK);
-
-    return MR_NORMAL;
+    if (attacks_to_king(pos, pos->pieces[them][PIECE_KING], 0ULL, 0ULL) & ~pos->occupied[them]) {
+        return MR_CHECK;
+    } else {
+        return MR_NORMAL;
+    }
 }
 
 
@@ -1729,154 +1810,351 @@ static double board_score_heuristic(struct pos const* pos)
 {
     double score = 0.0;
 
-    enum player const player = pos->player;
-    enum player const opp    = opposite_player(player);
-
     #define BOARD_CENTER ((FILE_MASK_C | FILE_MASK_D | FILE_MASK_E | FILE_MASK_F) \
         & ~(RANK_MASK_1 | RANK_MASK_2 | RANK_MASK_7 | RANK_MASK_8))
-    static const bitboard positional_bonus[PIECE_COUNT] = {
+    static bitboard const positional_modifier_area[PIECE_COUNT] = {
         [PIECE_PAWN] = BOARD_CENTER,
         [PIECE_KNIGHT] = BOARD_CENTER,
         [PIECE_QUEEN] = RANK_MASK_3 | RANK_MASK_4 | RANK_MASK_5 | RANK_MASK_6,
     };
-    static const double positional_bonus_factor[PIECE_COUNT] = {
-        [PIECE_PAWN]   =  0.20,
-        [PIECE_KNIGHT] =  0.20,
-        [PIECE_QUEEN]  = -0.30,
+    #undef BOARD_CENTER
+    static double const positional_modifier_factor[PIECE_COUNT] = {
+        [PIECE_PAWN]   =  0.02,
+        [PIECE_KNIGHT] =  0.02,
+        [PIECE_QUEEN]  = -0.03,
     };
 
-    bitboard const our_threats = all_threats_from_player(pos, player);
-    bitboard const their_threats = all_threats_from_player(pos, opp);
+    bitboard const white_threats = all_threats_from_player(pos, PLAYER_WHITE);
+    bitboard const black_threats = all_threats_from_player(pos, PLAYER_BLACK);
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wimplicit-int-float-conversion"
     for (enum piece p = PIECE_BEGIN; p < PIECE_COUNT; ++p) {
-        score += 0.05 * (double)bitboard_popcount(our_threats & pos->pieces[opp][p]) * piece_value[p];
-        score += 1.00 * (double)bitboard_popcount(pos->pieces[player][p]) * piece_value[p];
-        score += 
-            positional_bonus_factor[p] * (double)bitboard_popcount(pos->pieces[player][p] & positional_bonus[p]);
+        score += 0.002*piece_value[p] * 
+            ((double)bitboard_popcount(white_threats & pos->pieces[PLAYER_BLACK][p]) -
+             (double)bitboard_popcount(black_threats & pos->pieces[PLAYER_WHITE][p]));
 
-        score -= 0.05 * (double)bitboard_popcount(their_threats & pos->pieces[player][p]) * piece_value[p];
-        score -= (double)bitboard_popcount(pos->pieces[opp][p]) * piece_value[p];
-        score -=
-            positional_bonus_factor[p] * (double)bitboard_popcount(pos->pieces[opp][p] & positional_bonus[p]);
+        score += piece_value[p] *
+            ((double)bitboard_popcount(pos->pieces[PLAYER_WHITE][p]) -
+             (double)bitboard_popcount(pos->pieces[PLAYER_BLACK][p]));
+
+        score += positional_modifier_factor[p] *
+            ((double)bitboard_popcount(pos->pieces[PLAYER_WHITE][p] & positional_modifier_area[p]) -
+             (double)bitboard_popcount(pos->pieces[PLAYER_BLACK][p] & positional_modifier_area[p]));
     }
+#pragma clang diagnostic pop
 
-    return score;
+    double sign = (pos->player == PLAYER_WHITE) ? 1.0 : -1.0;
+
+    return sign*score;
 }
 
-struct search_option alphabeta_search(const struct pos* pos,
+static inline struct move moves_linear_search(struct move      moves[restrict static MOVE_MAX],
+                                              size_t* restrict move_count)
+{
+    size_t best = 0;
+    assert(*move_count > 0);
+    for (size_t i = 0; i < *move_count; ++i) {
+        if (moves[i].appeal > moves[best].appeal) {
+            best = i;
+        }
+    }
+
+    struct move m = moves[best];
+    moves[best] = moves[(*move_count) - 1];
+    *move_count -= 1;
+
+    return m;
+}
+
+/* quiescence is a deep search that only considers captures */
+double quiesce(struct pos const* pos,
+               enum piece        mailbox[restrict static SQ_INDEX_COUNT],
+               enum player       us,
+               double            alpha,
+               double            beta,
+               int8_t            depth)
+{
+    enum player const them = opposite_player(us);
+
+    double score = board_score_heuristic(pos);
+    double highscore = score;
+
+    if (highscore >= beta) {
+        return highscore;
+    }
+    if (highscore > alpha) {
+        alpha = highscore;
+    }
+
+    size_t move_count = 0;
+
+    struct move* moves = malloc(sizeof(struct move[MOVE_MAX]));
+    if (!moves) {
+        abort();
+    }
+
+    /*struct move moves[MOVE_MAX];*/
+
+    all_moves(pos, us, &move_count, moves);
+    if (move_count == 0) {
+        /* TODO: detect stalemate */
+        free(moves);
+        return -(999.0 + (double)depth);
+    }
+    for (size_t i = 0; i < move_count; ++i) {
+        move_compute_appeal(&moves[i], pos, us, mailbox);
+    }
+
+    while (move_count) {
+        struct move m = moves_linear_search(moves, &move_count);
+
+        if ((m.attr & MATTR_CAPTURE) == 0) {
+            continue;
+        }
+
+        /* TODO: make lean apply/undo mechanism instead of copying,
+         * use of malloc is particularly horrendous */
+        struct pos* poscpy = malloc(sizeof *poscpy);
+        if (!poscpy) {
+            perror("malloc");
+            abort();
+        }
+        *poscpy = *pos;
+        enum piece* mailbox_cpy = malloc(sizeof (enum piece[SQ_INDEX_COUNT]));
+        if (!mailbox_cpy) {
+            perror("malloc");
+            abort();
+        }
+        memcpy(mailbox_cpy, mailbox, sizeof (enum piece[SQ_INDEX_COUNT]));
+
+        /* history is irrelevant when all moves are captures */
+        static struct history hist;
+        hist.length = 0;
+        (void)board_move(poscpy, &hist, mailbox_cpy, m);
+
+        score = -quiesce(poscpy, mailbox_cpy, them, -beta, -alpha, depth - 1);
+
+        free(poscpy);
+        free(mailbox_cpy);
+
+        if (score >= beta) {
+            highscore = score;
+            break;
+        }
+        if (score > highscore) {
+            highscore = score;
+        }
+        if (score > alpha) {
+            alpha = score;
+        }
+    }
+
+    free(moves);
+
+    return highscore;
+}
+
+
+struct search_option alphabeta_search(struct pos const* pos,
                                       struct history*   hist,
                                       struct tt*        tt,
                                       enum piece        mailbox[restrict static SQ_INDEX_COUNT],
                                       enum player       us,
-                                      int               depth,
+                                      int8_t            depth,
                                       double            alpha,
                                       double            beta)
 {
+
+    const double alpha_orig = alpha;
+
+    // Terminal / leaf
     if (depth <= 0) {
-        return (struct search_option){.score = board_score_heuristic(pos)};
+        return (struct search_option) {
+            /*.score  = quiesce(pos, mailbox, us, alpha, beta, depth),*/
+            .score  = board_score_heuristic(pos),
+            .move   = (struct move){0},
+            .depth  = 0,
+            .hash   = pos->hash,
+            .init   = true,
+            .flag   = TT_EXACT,
+        };
     }
 
+    /* TT probe at current node */
+    global_stats.tt_probes += 1;
+    struct search_option tte = tt_get(tt, pos->hash);
+
+#ifndef NDEBUG
+    if (tte.init && tte.hash == pos->hash) {
+        global_stats.tt_hits += 1;
+    } else if (tte.init && tte.hash != pos->hash) {
+        global_stats.tt_collisions += 1;
+    }
+#endif
+
+    if (tte.init && tte.hash == pos->hash && tte.depth >= depth) {
+        if (tte.flag == TT_EXACT) {
+            return tte;
+        } else if (tte.flag == TT_LOWER) {
+            if (tte.score > alpha) alpha = tte.score;
+        } else if (tte.flag == TT_UPPER) {
+            if (tte.score < beta) beta = tte.score;
+        }
+        if (alpha >= beta) {
+            return tte;
+        }
+    }
     struct move moves[MOVE_MAX];
     size_t move_count = 0ULL;
     all_moves(pos, us, &move_count, moves);
+
     if (move_count == 0) {
-        return (struct search_option){.score = -999*depth};
+        /* TODO: detect stalemate */
+
+        /* TODO: reusing mate distances correctly needs ply normalization */
+        return (struct search_option) {
+            .score  = -(999.0 + (double)depth),
+            .move   = (struct move){0},
+            .depth  = depth,
+            .hash   = pos->hash,
+            .init   = true,
+            .flag   = TT_EXACT,
+        };
     }
 
-    double value = alpha;
-
     for (size_t i = 0; i < move_count; ++i) {
+        move_compute_appeal(&moves[i], pos, us, mailbox);
+    }
+
+    /* if TT had a best move for this position, search it first. */
+    if (tte.init && tte.hash == pos->hash) {
+        for (size_t i = 0; i < move_count; ++i) {
+            if (moves[i].from == tte.move.from && moves[i].to == tte.move.to) {
+                moves[i].appeal = APPEAL_MAX;
+                break;
+            }
+        }
+    }
+
+    double best_score = -1e300;
+    struct move best_move = moves[0];
+
+
+    while (move_count) {
+        struct move m = moves_linear_search(moves, &move_count);
+
+        /* TODO: make lean apply/undo mechanism instead of copying */
         struct pos poscpy = *pos;
         enum piece mailbox_cpy[SQ_INDEX_COUNT];
         memcpy(mailbox_cpy, mailbox, sizeof mailbox_cpy);
         size_t old_hist_length = hist->length;
-        enum move_result const r = board_move(&poscpy, hist, mailbox_cpy, moves[i]);
 
-        double x;
+        enum move_result const r = board_move(&poscpy, hist, mailbox_cpy, m);
 
+        double score;
         if (r == MR_STALEMATE) {
-            x = 0.0;
+            score = 0.0;
         } else {
-            x = -alphabeta_search(&poscpy,
-                                  hist,
-                                  tt,
-                                  mailbox_cpy,
-                                  opposite_player(us),
-                                  depth-1,
-                                  -beta,
-                                  -value).score;
+            score = -alphabeta_search(&poscpy,
+                                      hist,
+                                      tt,
+                                      mailbox_cpy,
+                                      opposite_player(us),
+                                      depth - 1,
+                                      -beta,
+                                      -alpha).score;
         }
 
         hist->length = old_hist_length;
 
-        if (x > value) {
-            value = x;
+        if (score > best_score) {
+            best_score = score;
+            best_move  = m;
         }
-        if (value >= beta) {
-            return (struct search_option) {.score = value, .move = moves[i]};
+
+        if (score > alpha) {
+            alpha = score;
+        }
+
+        if (alpha >= beta) {
+            struct search_option out = {
+                .score  = alpha,
+                .move   = best_move,
+                .depth  = depth,
+                .hash   = pos->hash,
+                .init   = true,
+                .flag   = TT_LOWER,
+            };
+            tt_insert(tt, pos->hash, out);
+            return out;
         }
     }
 
-    return (struct search_option){.score = value, .move = moves[0]};
+    enum tt_flag flag = TT_EXACT;
+    if (best_score <= alpha_orig) flag = TT_UPPER;
+
+    struct search_option out = {
+        .score  = best_score,
+        .move   = best_move,
+        .depth  = depth,
+        .hash   = pos->hash,
+        .init   = true,
+        .flag   = flag,
+    };
+    tt_insert(tt, pos->hash, out);
+    return out;
 }
 
-struct move search(struct board* b, enum player us, int depth)
+struct move search(struct board* b, enum player us, int8_t max_depth)
 {
-    struct move moves[MOVE_MAX];
-    size_t move_count = 0ULL;
-    all_moves(&b->pos, us, &move_count, moves);
-    if (move_count == 0) {
-        abort();
-    }
-
-    struct search_option best = {
-        .score = -INFINITY,
-        .move = moves[0],
-    };
-
-    memset(&b->tt, 0, sizeof b->tt);
-
-    for (size_t i = 0; i < move_count; ++i) {
-        struct pos poscpy = b->pos;
-        enum piece mailbox_cpy[SQ_INDEX_COUNT];
-        memcpy(mailbox_cpy, b->mailbox, sizeof mailbox_cpy);
-        size_t old_hist_length = b->hist.length;
-
-        enum move_result const r = board_move(&poscpy, &b->hist, mailbox_cpy, moves[i]);
-
-        double x;
-        if (r == MR_STALEMATE) {
-            x = 0.0;
-        } else {
-            x = -alphabeta_search(&poscpy,
-                                  &b->hist,
-                                  &b->tt,
-                                  mailbox_cpy,
-                                  opposite_player(us),
-                                  depth-1,
-                                  -INFINITY,
-                                  -best.score).score;
-        }
-        b->hist.length = old_hist_length;
-
-        x +=  1.0 * !!(moves[i].attr & MATTR_CASTLE_KINGSIDE);
-        x +=  0.5 * !!(moves[i].attr & MATTR_CASTLE_QUEENSIDE);
-        x += -0.5 * !!(b->pos.pieces[us][PIECE_QUEEN] & SQ_MASK_FROM_INDEX(moves[i].from));
-
-        if (x > best.score) {
-            best.score = x;
-            best.move = moves[i];
+    if (b->tt.entries == NULL) {
+        b->tt.entries = calloc(TT_ENTRIES, sizeof b->tt.entries[0]);
+        if (b->tt.entries == NULL) {
+            perror("calloc");
+            exit(EXIT_FAILURE);
         }
     }
 
-    printf("move %s->%s has score %lf\n",
-            square_index_str[best.move.from],
-            square_index_str[best.move.to],
-            best.score );
+    struct move best_move = {0};
 
-    assert(best.move.from != best.move.to);
+    double score = 0.0;
 
-    return best.move;
+#define SCORE_INF 1e80
+
+    for (int8_t d = 1; d <= max_depth; ++d) {
+        double window = 0.5; /* half a pawn */
+        double alpha = score - window;
+        double beta = score + window;
+
+        while (true) {
+            struct search_option so =
+                alphabeta_search(&b->pos, &b->hist, &b->tt, b->mailbox, us, d, alpha, beta);
+
+            if (so.score > alpha && so.score < beta) {
+                score = so.score;
+                best_move = so.move;
+                break;
+            }
+
+            window *= 2;
+
+            alpha = score - window;
+            beta = score + window;
+            
+            if (so.score <= alpha) {
+                alpha = -SCORE_INF;
+            } else {
+                beta = SCORE_INF;
+            }
+
+        }
+        fprintf(stderr, "depth: %d\n", d);
+    }
+
+#undef SCORE_INF
+
+    return best_move;
 }
 
 

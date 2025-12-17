@@ -7,7 +7,7 @@ CFLAGS.gcc.debug := -ggdb -O0 -fsanitize=address
 CFLAGS.gcc := -std=c23 -Wall -Wextra -Wconversion -Wno-unused-function
 
 CFLAGS.clang.release := -O3
-CFLAGS.clang.debug := -ggdb -O0
+CFLAGS.clang.debug := -ggdb -O0 -fsanitize=address
 CFLAGS.clang := -std=c23 -Wall -Wextra -Wconversion -Wno-unused-function -Wimplicit-int-conversion
 
 CFLAGS :=  $(CFLAGS.$(CC)) $(CFLAGS.$(CC).$(BUILD))

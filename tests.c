@@ -360,10 +360,15 @@ static void test_bishops(void)
 int main()
 {
 
-    printf("sizeof board: %zu\n", sizeof (struct board));
+    printf("sizeof board:   %zu\n", sizeof (struct board));
+    printf("sizeof pos:     %zu\n", sizeof (struct pos));
+    printf("sizeof mailbox: %zu\n", sizeof (struct board){0}.mailbox);
+    printf("sizeof tt:      %zu\n", sizeof (struct tt));
 
+#if 0
     test_rooks();
     test_bishops();
+#endif
 
     for (int i = 40; i < 47; i++) {
         fprintf(stdout, "\033[30;%dm ", i);
@@ -372,7 +377,8 @@ int main()
     struct board board = BOARD_INITIAL;
 
     //board_load_fen_unsafe(&board, "1n1q1rk1/r1p2P2/1p1pp2p/pB2P3/2P5/PPN5/6b1/3QK1NR b - - 0 1");
-    //board_print_fen(&board, stdout);
+    board_load_fen_unsafe(&board, "5R2/7k/P7/6pp/3B4/1PPK2bP/4r3/8 b - - 3 57");
+    board_print_fen(&board, stdout);
     board_print(&board.pos, NULL, stdout);
 
     struct move moves[MOVE_MAX];
@@ -390,7 +396,7 @@ int main()
         }
         
         //struct move move = moves[0];
-        struct move move = search(&board, board.pos.player, 6);
+        struct move move = search(&board, board.pos.player, 7);
 
         printf("move %d: {\n"
                "    .from = %s, (%s)\n"
@@ -408,6 +414,8 @@ int main()
         enum move_result const r = board_move_2(&board, move);
 
 #if 1
+        board_print_fen(&board, stdout);
+        print_stats(stdout);
         board_print(&board.pos, &move, stdout);
 #endif
 
