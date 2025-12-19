@@ -22,18 +22,6 @@ const WasmHost = (() => {
     return { load, getFn };
 })();
 
-/*
-static inline struct move wasm_MoveTo_move(uint64_t m)
-{
-	return (struct move) {
-		.appeal = (m >> 24) & 0xFF,
-		.attr   = (m >> 16) & 0xFF,
-		.from   = (m >>  8) & 0xFF,
-		.to     = (m >>  0) & 0xFF,
-	};
-}
-*/
-
 const MoveResult = Object.freeze({
 	Normal:    0,
     Check:     1,
@@ -217,7 +205,7 @@ const run = async () => {
 		console.log("from:", move.from.fileChar(), move.from.rankChar(),
 					"to:",   move.to.fileChar(), move.to.rankChar());
 
-		const mr = wb_move(m);
+		const mr = wb_move(Number(m));
 		if (mr == MoveResult.Stalemate || mr == MoveResult.Checkmate) {
 			console.log(_moveResultName[mr]);
 			break;

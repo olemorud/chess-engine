@@ -38,11 +38,11 @@ uint64_t wb_search(int8_t max_depth)
 	return move_serialize(sr.move);
 }
 
-enum move_result wb_move(uint32_t move)
+int32_t wb_move(uint32_t move)
 {
 	struct move m = move_deserialize(move);
 	enum move_result const r = board_move_2(&g_board, m);
-	return r;
+	return (int32_t)r;
 }
 
 void wb_init()
