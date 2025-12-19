@@ -30,5 +30,5 @@ mbb_rook.h: codegen
 mbb_bishop.h: codegen
 	./codegen
 
-tests: tests.c mbb_rook.h mbb_bishop.h base.h
+tests: tests.c mbb_rook.h mbb_bishop.h engine.h
 	$(CC) -o $@ $(CFLAGS) tests.c

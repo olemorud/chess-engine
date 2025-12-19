@@ -1,5 +1,7 @@
 #define CODEGEN
-#include "base.h"
+#include "engine.h"
+#include "libc-lite.h"
+#include "board_print.h"
 #include <stdlib.h>
 #include <stdio.h>
 
@@ -64,7 +66,7 @@ int main()
 
             /* brute force the magic number */
             for (;;) { 
-                bitboard magic = rand64() & rand64() & rand64();
+                bitboard magic = my_rand64() & my_rand64() & my_rand64();
 
                 bitboard atk = 0ULL;
                 for (bitboard test = 0; test < (1ULL<<rook_relevant_bits_count); test++) {
@@ -120,7 +122,7 @@ int main()
             /* brute force the magic number */
             bitboard magic = 0ULL;
             for (;;) { 
-                magic = rand64() & rand64() & rand64();
+                magic = my_rand64() & my_rand64() & my_rand64();
 
                 bitboard atk = 0ULL;
                 for (bitboard test = 0; test < (1ULL<<bishop_relevant_bits_count); test++) {
