@@ -1,32 +1,16 @@
 #pragma once
 
-#include <ctype.h>
-#include <math.h>
-#include <locale.h>
+#include "libc-lite.h"
+#include "sys.h"
+
 #include <stdint.h>
-#include <assert.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <inttypes.h>
 
-#define index string_index
-#include <string.h>
-#undef index
-
-static struct {
-    /* all globals are zero by default in C */
-    uint64_t tt_collisions;
-    uint64_t tt_hits;
-    uint64_t tt_probes;
-} global_stats;
-
-static void print_stats(FILE* out)
-{
-    fprintf(out, "Stats:\n");
-    fprintf(out, "tt collisions: %lu\n", global_stats.tt_collisions);
-    fprintf(out, "tt hits:       %lu\n", global_stats.tt_hits);
-    fprintf(out, "tt probes:     %lu\n", global_stats.tt_probes);
-}
+#ifndef NDEBUG
+#define assert(expr) \
+			((expr) ? 0 : (__builtin_trap(), 0))
+#else
+#define assert(...) (void)0
+#endif
 
 /* BIT MANIPULATION
  * ================ */
@@ -41,23 +25,6 @@ static inline uint64_t ctz(uint64_t n)
 {
     assert(n != 0);
     return (uint64_t)__builtin_ctzll(n);
-}
-
-/**/
-static uint64_t rand64() {
-    union {
-        uint64_t v;
-        uint16_t vs[4];
-    } x = {
-        .vs = {
-            (uint16_t)rand(),
-            (uint16_t)rand(),
-            (uint16_t)rand(),
-            (uint16_t)rand(),
-        }
-    };
-
-    return x.v;
 }
 
 /* BITBOARD AND INDEX DATATYPES AND HELPERS
@@ -86,12 +53,9 @@ h2##g2##f2##e2##d2##c2##b2##a2##\
 h1##g1##f1##e1##d1##c1##b1##a1##\
 ULL
 
-#define BITBOARD_FMT PRIu64
-#define BITBOARD_FMT_X PRIx64
 
 typedef uint8_t index;
 #define INDEX(n) n##ULL
-#define INDEX_FMT PRIu8
 
 #define RANK_SHIFT_UP(b, n)    ((b) << ((index)(n)*8U))
 #define RANK_SHIFT_DOWN(b, n)  ((b) >> ((index)(n)*8U))
@@ -124,6 +88,17 @@ enum file_index : index {
     FILE_INDEX_COUNT,
 };
 
+char const file_index_char[FILE_INDEX_COUNT] = {
+    [FILE_INDEX_A] = 'A',
+    [FILE_INDEX_B] = 'B',
+    [FILE_INDEX_C] = 'C',
+    [FILE_INDEX_D] = 'D',
+    [FILE_INDEX_E] = 'E',
+    [FILE_INDEX_F] = 'F',
+    [FILE_INDEX_G] = 'G',
+    [FILE_INDEX_H] = 'H',
+};
+
 enum rank_index : index {
     RANK_INDEX_BEGIN,
     RANK_INDEX_1 = RANK_INDEX_BEGIN,
@@ -135,6 +110,17 @@ enum rank_index : index {
     RANK_INDEX_7,
     RANK_INDEX_8,
     RANK_INDEX_COUNT,
+};
+
+char const rank_index_char[RANK_INDEX_COUNT] = {
+    [RANK_INDEX_1] = '1',
+    [RANK_INDEX_2] = '2',
+    [RANK_INDEX_3] = '3',
+    [RANK_INDEX_4] = '4',
+    [RANK_INDEX_5] = '5',
+    [RANK_INDEX_6] = '6',
+    [RANK_INDEX_7] = '7',
+    [RANK_INDEX_8] = '8',
 };
 
 #define STR(x) #x
@@ -330,7 +316,7 @@ enum : bitboard {
  *  Player
  *  ===========
  * */
-enum player : size_t {
+enum player : uint8_t {
     PLAYER_BEGIN,
     PLAYER_WHITE = PLAYER_BEGIN,
     PLAYER_BLACK,
@@ -885,7 +871,16 @@ struct search_option {
 #define TT_ADDRESS_BITS 24
 #define TT_ENTRIES (1ULL<<TT_ADDRESS_BITS)
 struct tt {
-    struct search_option* entries; /* must be initialized somewhere */
+    struct search_option* entries/*[TT_ENTRIES]*/; /* must be initialized somewhere */
+
+#ifndef NDEBUG
+    /* stats */
+    uint64_t collisions;
+    uint64_t hits;
+    uint64_t probes;
+    uint64_t overwritten;
+    uint64_t insertions;
+#endif
 };
 
 
@@ -906,7 +901,7 @@ struct board {
 
     /* used for repeated board state detection only */
     struct history {
-        struct pos items[4096];
+        struct pos items[64];
         size_t length;
     } hist;
 
@@ -936,7 +931,7 @@ static void move_compute_appeal(struct move*      m,
     m->appeal = 16*n - (uint8_t)piece_value[atk];
 }
 
-#define BOARD_INITIAL (struct board) {                    \
+#define BOARD_INIT (struct board) {                       \
     .pos = {                                              \
         .fullmoves = 1,                                   \
         .pieces = {                                       \
@@ -1006,81 +1001,6 @@ static void move_compute_appeal(struct move*      m,
     .hist = {0},                                          \
 }
 
-static void board_print_fen(struct pos const* pos, FILE* out)
-{
-    int buf[8][8] = {0};
-
-    for (enum player player = PLAYER_BEGIN; player < PLAYER_COUNT; ++player) {
-        for (enum piece piece = PIECE_BEGIN; piece < PIECE_COUNT; ++piece) {
-            bitboard x = pos->pieces[player][piece];
-
-            for (index i = 7; i < 8; i--) {
-                for (index j = 0; j < 8; ++j) {
-                    if (x & (1ULL<<(i*8+j))) {
-                        buf[i][j] = piece_char[player][piece];
-                    }
-                }
-            }
-        }
-    }
-
-    for (enum rank_index i = RANK_INDEX_8; i < RANK_INDEX_COUNT; --i) {
-        int consequtive_empty = 0;
-        for (enum file_index j = FILE_INDEX_A; j < FILE_INDEX_COUNT; ++j) {
-            if (buf[i][j]) {
-                if (consequtive_empty) {
-                    fprintf(out, "%d", consequtive_empty);
-                    consequtive_empty = 0;
-                }
-                fprintf(out, "%lc", buf[i][j]);
-            } else {
-                consequtive_empty += 1;
-            }
-        }
-        if (consequtive_empty) {
-            fprintf(out, "%d", consequtive_empty);
-        }
-        if (i > 0)
-            fprintf(out, "/");
-    }
-
-    fprintf(out, " %c ", pos->player == PLAYER_WHITE ? 'w' : 'b');
-
-    bool any_castle = false;
-    if (!pos->castling_illegal[PLAYER_WHITE][CASTLE_KINGSIDE]) {
-        fprintf(out, "K");
-        any_castle = true;
-    }
-    if (!pos->castling_illegal[PLAYER_WHITE][CASTLE_QUEENSIDE]) {
-        fprintf(out, "Q");
-        any_castle = true;
-    }
-    if (!pos->castling_illegal[PLAYER_BLACK][CASTLE_KINGSIDE]) {
-        fprintf(out, "k");
-        any_castle = true;
-    }
-    if (!pos->castling_illegal[PLAYER_BLACK][CASTLE_QUEENSIDE]) {
-        fprintf(out, "q");
-        any_castle = true;
-    }
-    if (!any_castle) {
-        fprintf(out, "-");
-    }
-
-    if (pos->ep_targets) {
-        /* should be ep target square in algebraic notation */
-        fprintf(stderr, "not implemented: fen with en passent squares\n");
-        fprintf(out, "<TODO>");
-    } else {
-        fprintf(out, " -");
-    }
-
-    fprintf(out, " %d", pos->halfmoves);
-    fprintf(out, " %d", pos->fullmoves);
-
-    fprintf(out, "\n");
-}
-
 static bool board_load_fen_unsafe(struct board* b, char const* fen_str)
 {
     /* TODO: this function is not tested for malicious/corrupted inputs */
@@ -1093,17 +1013,17 @@ static bool board_load_fen_unsafe(struct board* b, char const* fen_str)
         .i = 0,
         .len = strlen(fen_str),
     };
-#define BUF_GETCHAR(x) (fprintf(stderr, "[%c]", x.buf[x.i]), assert(x.i < x.len), x.buf[x.i++])
+#define BUF_GETCHAR(x) (assert(x.i < x.len), x.buf[x.i++])
 
-    memset(&b->pos, 0, sizeof b->pos);
+    my_memset(&b->pos, 0, sizeof b->pos);
     b->pos.hash = ~0ULL;
 
     for (enum rank_index ri = RANK_INDEX_8; ri < RANK_INDEX_COUNT; --ri) {
         for (enum file_index fi = FILE_INDEX_BEGIN; fi < FILE_INDEX_COUNT; ++fi) {
             char const ch = BUF_GETCHAR(fen);
-            if (isdigit(ch)) {
+            if (my_isdigit(ch)) {
                 if (ch == '0') {
-                    abort();
+                    __builtin_trap();
                 }
                 fi += ch - '0' - 1;
             } else {
@@ -1124,14 +1044,14 @@ static bool board_load_fen_unsafe(struct board* b, char const* fen_str)
         } else if (ch == 'b') {
             b->pos.player = PLAYER_BLACK;
         } else {
-            abort();
+            __builtin_trap();
         }
     }
 
     { /* castling */
         char ch = BUF_GETCHAR(fen);
         if (ch != ' ') {
-            abort();
+            __builtin_trap();
         }
         b->pos.castling_illegal[PLAYER_WHITE][CASTLE_KINGSIDE] = true;
         b->pos.castling_illegal[PLAYER_WHITE][CASTLE_QUEENSIDE] = true;
@@ -1147,8 +1067,7 @@ static bool board_load_fen_unsafe(struct board* b, char const* fen_str)
                 case ' ': break;
                 case '-': break;
                 default: {
-                    fprintf(stderr, "unexpected char '%c'\n", ch); 
-                    abort();
+                    __builtin_trap();
                 } break;
             }
         } while (ch != ' ');
@@ -1157,8 +1076,7 @@ static bool board_load_fen_unsafe(struct board* b, char const* fen_str)
     { /* en passent */
         char const ch = BUF_GETCHAR(fen);
         if (ch != '-') {
-            fprintf(stderr, "ep targets in fen not implemented yet\n");
-            abort();
+            __builtin_trap();
         }
     }
 
@@ -1522,14 +1440,14 @@ static void init_zobrist()
     for (enum square_index sq = SQ_INDEX_BEGIN; sq < SQ_INDEX_COUNT; ++sq) {
         for (enum player pl = PLAYER_BEGIN; pl < PLAYER_COUNT; ++pl) {
             for (enum piece piece = PIECE_BEGIN; piece < PIECE_COUNT; ++piece) {
-                zobrist.piece_keys[sq][pl][piece] = rand64();
+                zobrist.piece_keys[sq][pl][piece] = my_rand64();
             }
         }
-        zobrist.ep_targets[sq] = rand64();
+        zobrist.ep_targets[sq] = my_rand64();
     }
     for (enum player pl = PLAYER_BEGIN; pl < PLAYER_COUNT; ++pl) {
         for (enum castle_direction d = CASTLE_BEGIN; d < CASTLE_COUNT; ++d) {
-            zobrist.castling_keys[pl][d] = rand64();
+            zobrist.castling_keys[pl][d] = my_rand64();
         }
     }
     zobrist.init = true;
@@ -1573,10 +1491,20 @@ static inline uint64_t tt_hash_switch_player(uint64_t hash)
     return ~hash;
 }
 
-static inline struct search_option tt_get(struct tt const* tt, uint64_t hash)
+static inline struct search_option tt_get(struct tt* tt, uint64_t hash)
 {
     uint64_t const addr = hash % TT_ENTRIES; 
-    return tt->entries[addr];
+    struct search_option tte = tt->entries[addr];
+
+#ifndef NDEBUG
+    tt->probes += 1;
+    if (tte.init && tte.hash == hash) {
+        tt->hits += 1;
+    } else if (tte.init && tte.hash != hash) {
+        tt->collisions += 1;
+    }
+#endif
+    return tte;
 }
 
 static inline void tt_insert(struct tt* tt, uint64_t hash, struct search_option so)
@@ -1584,16 +1512,18 @@ static inline void tt_insert(struct tt* tt, uint64_t hash, struct search_option 
     uint64_t const addr = hash % TT_ENTRIES; 
     so.init = true;
     tt->entries[addr] = so;
+#ifndef NDEBUG
+    tt->insertions += 1;
+#endif
 }
 
 enum move_result {
     MR_NORMAL,
     MR_CHECK,
+	MR_REPEATS, /* this board state has been observed before */
     MR_STALEMATE,
     MR_CHECKMATE,
 };
-
-static void board_print(const struct pos* pos, struct move* move, FILE* out);
 
 /* does not check validity */
 static enum move_result board_move(struct pos* restrict     pos,
@@ -1603,20 +1533,6 @@ static enum move_result board_move(struct pos* restrict     pos,
 {
     enum player const us   = pos->player;
     enum player const them = opposite_player(us);
-
-#ifndef NDEBUG
-    if (SQ_MASK_FROM_INDEX(move.to) & pos->pieces[them][PIECE_KING]) {
-        fprintf(stderr, "fatal error: king capture\n");
-        board_print_fen(pos, stderr);
-        board_print(pos, &move, stderr);
-        for (enum piece p = PIECE_BEGIN; p < PIECE_COUNT; ++p) {
-            if (pos->pieces[us][p] & SQ_MASK_FROM_INDEX(move.from)) {
-                fprintf(stderr, "%s found on %s\n", piece_str[p], square_index_display[move.from]);
-            }
-        }
-        __builtin_trap();
-    }
-#endif
 
     enum piece const from_piece = mailbox[move.from];
     enum piece const to_piece = mailbox[move.to];
@@ -1749,26 +1665,35 @@ static enum move_result board_move(struct pos* restrict     pos,
     pos->fullmoves += (pos->player == PLAYER_BLACK);
     pos->halfmoves += 1;
 
-    assert(hist->length < 4096);
+    assert(hist->length < 64);
+	int repetitions = 0;
     for (size_t i = 0; i < hist->length; ++i) {
         _Static_assert(sizeof *pos == sizeof hist->items[i]);
-        if (!memcmp(&hist->items[i].pieces, &pos->pieces, sizeof pos->pieces)
-         && !memcmp(&hist->items[i].castling_illegal, &pos->castling_illegal, sizeof pos->castling_illegal)
+        if (!my_memcmp(&hist->items[i].pieces, &pos->pieces, sizeof pos->pieces)
+         && !my_memcmp(&hist->items[i].castling_illegal, &pos->castling_illegal, sizeof pos->castling_illegal)
          && hist->items[i].player == pos->player
          && hist->items[i].ep_targets == pos->ep_targets)
         {
-            return MR_STALEMATE;
+			repetitions += 1;
         }
     }
+
     hist->items[hist->length++] = *pos;
 
-    if (pos->halfmoves > 50) {
+	if (repetitions >= 3 || pos->halfmoves > 50) {
+		return MR_STALEMATE;
+	}
+	else if (repetitions > 0) {
+		return MR_REPEATS;
+	}
+	else if (pos->halfmoves > 50) {
         return MR_STALEMATE;
     }
-
-    if (attacks_to(pos, pos->pieces[them][PIECE_KING], 0ULL, 0ULL) & ~pos->occupied[them]) {
+	else if (attacks_to(pos, pos->pieces[them][PIECE_KING], 0ULL, 0ULL)
+			& ~pos->occupied[them]) {
         return MR_CHECK;
-    } else {
+    }
+	else {
         return MR_NORMAL;
     }
 }
@@ -1789,41 +1714,60 @@ static enum move_result board_move_2(struct board* b, struct move move)
  * */
 static double board_score_heuristic(struct pos const* pos)
 {
+    /* this function always evaluates from white's perspective before
+       eventually flipping the sign */
     double score = 0.0;
 
-    #define BOARD_CENTER ((FILE_MASK_C | FILE_MASK_D | FILE_MASK_E | FILE_MASK_F) \
-        & ~(RANK_MASK_1 | RANK_MASK_2 | RANK_MASK_7 | RANK_MASK_8))
-    static bitboard const positional_modifier_area[PIECE_COUNT] = {
-        [PIECE_PAWN] = BOARD_CENTER,
-        [PIECE_KNIGHT] = BOARD_CENTER,
-        [PIECE_QUEEN] = RANK_MASK_3 | RANK_MASK_4 | RANK_MASK_5 | RANK_MASK_6,
-    };
-    #undef BOARD_CENTER
-    static double const positional_modifier_factor[PIECE_COUNT] = {
-        [PIECE_PAWN]   =  0.02,
-        [PIECE_KNIGHT] =  0.02,
-        [PIECE_QUEEN]  = -0.03,
-    };
+    /* evaluations.h defines:
+ - POSITIONAL_MODIFIER_COUNT
+ - static struct {bitboard const area; double const val} const
+  positional_modifier[PLAYER_COUNT][POSITIONAL_MODIFIER_COUNT][PIECE_COUNT];
+     * */
+#include "evaluations.h"
 
-    bitboard const white_threats = all_threats_from_player(pos, PLAYER_WHITE);
-    bitboard const black_threats = all_threats_from_player(pos, PLAYER_BLACK);
-
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wimplicit-int-float-conversion"
     for (enum piece p = PIECE_BEGIN; p < PIECE_COUNT; ++p) {
-        score += 0.002*piece_value[p] * 
-            ((double)bitboard_popcount(white_threats & pos->pieces[PLAYER_BLACK][p]) -
-             (double)bitboard_popcount(black_threats & pos->pieces[PLAYER_WHITE][p]));
-
+        /* raw material value */
         score += piece_value[p] *
             ((double)bitboard_popcount(pos->pieces[PLAYER_WHITE][p]) -
              (double)bitboard_popcount(pos->pieces[PLAYER_BLACK][p]));
 
-        score += positional_modifier_factor[p] *
-            ((double)bitboard_popcount(pos->pieces[PLAYER_WHITE][p] & positional_modifier_area[p]) -
-             (double)bitboard_popcount(pos->pieces[PLAYER_BLACK][p] & positional_modifier_area[p]));
+        /* pawns defending pieces are desired */
+        score += 0.05 * (
+            (double)bitboard_popcount(
+                pawn_attacks_white(pos->pieces[PLAYER_WHITE][PIECE_PAWN])
+                & pos->pieces[PLAYER_WHITE][p]
+            )
+            - (double)bitboard_popcount(
+                pawn_attacks_black(pos->pieces[PLAYER_WHITE][PIECE_PAWN])
+                & pos->pieces[PLAYER_WHITE][p]
+            )
+        );
+
+        /* positional bonus, see evaluations.h */
+        for (size_t i = 0; i < POSITIONAL_MODIFIER_COUNT; ++i) {
+            score += positional_modifier[PLAYER_WHITE][i][p].val *
+                (
+                 (double)bitboard_popcount(
+                    pos->pieces[PLAYER_WHITE][p]
+                  & positional_modifier[PLAYER_WHITE][i][p].area
+                 )
+               - (double)bitboard_popcount(
+                     pos->pieces[PLAYER_BLACK][p]
+                   & positional_modifier[PLAYER_BLACK][i][p].area
+                 )
+               );
+        }
     }
-#pragma clang diagnostic pop
+
+    /* stacked pawns are bad */
+    const double k = 0.30;
+    for (enum file_index fi = FILE_INDEX_BEGIN; fi < FILE_INDEX_COUNT; ++fi) {
+        uint64_t wstk = bitboard_popcount(pos->pieces[PLAYER_WHITE][PIECE_PAWN] & FILE_MASK(fi));
+        uint64_t bstk = bitboard_popcount(pos->pieces[PLAYER_BLACK][PIECE_PAWN] & FILE_MASK(fi));
+
+        score -= k * (double)(wstk - (wstk == 1));
+        score += k * (double)(bstk - (bstk == 1));
+    }
 
     double sign = (pos->player == PLAYER_WHITE) ? 1.0 : -1.0;
 
@@ -1870,17 +1814,11 @@ double quiesce(struct pos const* pos,
 
     size_t move_count = 0;
 
-    struct move* moves = malloc(sizeof(struct move[MOVE_MAX]));
-    if (!moves) {
-        abort();
-    }
-
-    /*struct move moves[MOVE_MAX];*/
+	struct move moves[MOVE_MAX];
 
     all_moves(pos, us, &move_count, moves);
     if (move_count == 0) {
         /* TODO: detect stalemate */
-        free(moves);
         return -(999.0 + (double)depth);
     }
     for (size_t i = 0; i < move_count; ++i) {
@@ -1893,31 +1831,18 @@ double quiesce(struct pos const* pos,
         if ((m.attr & MATTR_CAPTURE) == 0ULL) {
             continue;
         }
+        struct pos poscpy = *pos;
 
-        /* TODO: make lean apply/undo mechanism instead of copying,
-         * use of malloc is particularly horrendous */
-        struct pos* poscpy = malloc(sizeof *poscpy);
-        if (!poscpy) {
-            perror("malloc");
-            abort();
-        }
-        *poscpy = *pos;
-        enum piece* mailbox_cpy = malloc(sizeof (enum piece[SQ_INDEX_COUNT]));
-        if (!mailbox_cpy) {
-            perror("malloc");
-            abort();
-        }
-        memcpy(mailbox_cpy, mailbox, sizeof (enum piece[SQ_INDEX_COUNT]));
+		enum piece mailbox_cpy[SQ_INDEX_COUNT];
+        my_memcpy(mailbox_cpy, mailbox, sizeof (enum piece[SQ_INDEX_COUNT]));
+
 
         /* history is irrelevant when all moves are captures */
         static struct history hist;
         hist.length = 0;
-        (void)board_move(poscpy, &hist, mailbox_cpy, m);
+        (void)board_move(&poscpy, &hist, mailbox_cpy, m);
 
-        score = -quiesce(poscpy, mailbox_cpy, them, -beta, -alpha, depth - 1);
-
-        free(poscpy);
-        free(mailbox_cpy);
+        score = -quiesce(&poscpy, mailbox_cpy, them, -beta, -alpha, depth - 1);
 
         if (score >= beta) {
             highscore = score;
@@ -1931,29 +1856,25 @@ double quiesce(struct pos const* pos,
         }
     }
 
-    free(moves);
-
     return highscore;
 }
 
 
+static
 struct search_option alphabeta_search(struct pos const* pos,
                                       struct history*   hist,
                                       struct tt*        tt,
                                       enum piece        mailbox[restrict static SQ_INDEX_COUNT],
                                       enum player       us,
                                       int8_t            depth,
+                                      uint64_t          mattr_filter,
                                       double            alpha,
                                       double            beta)
 {
-
-    const double alpha_orig = alpha;
-
-    // Terminal / leaf
     if (depth <= 0) {
         return (struct search_option) {
-            /*.score  = quiesce(pos, mailbox, us, alpha, beta, depth),*/
-            .score  = board_score_heuristic(pos),
+            .score  = quiesce(pos, mailbox, us, alpha, beta, 0),
+            /*.score  = board_score_heuristic(pos),*/
             .move   = (struct move){0},
             .depth  = 0,
             .hash   = pos->hash,
@@ -1962,17 +1883,9 @@ struct search_option alphabeta_search(struct pos const* pos,
         };
     }
 
-    /* TT probe at current node */
-    global_stats.tt_probes += 1;
-    struct search_option tte = tt_get(tt, pos->hash);
+    double const alpha_orig = alpha;
 
-#ifndef NDEBUG
-    if (tte.init && tte.hash == pos->hash) {
-        global_stats.tt_hits += 1;
-    } else if (tte.init && tte.hash != pos->hash) {
-        global_stats.tt_collisions += 1;
-    }
-#endif
+    struct search_option tte = tt_get(tt, pos->hash);
 
     if (tte.init && tte.hash == pos->hash && tte.depth >= depth) {
         if (tte.flag == TT_EXACT) {
@@ -1992,7 +1905,6 @@ struct search_option alphabeta_search(struct pos const* pos,
 
     if (move_count == 0) {
         /* TODO: reusing mate distances correctly needs ply normalization */
-        /* TODO: detect stalemate */
         double score = 0;
         if (attacks_to(pos, pos->pieces[us][PIECE_KING], 0ULL, 0ULL) != 0ULL) {
             score = -(999.0 + (double)depth);
@@ -2027,16 +1939,20 @@ struct search_option alphabeta_search(struct pos const* pos,
     while (move_count) {
         struct move m = moves_linear_search(moves, &move_count);
 
+        if (mattr_filter && !(m.attr & mattr_filter)) {
+            continue;
+        }
+
         /* TODO: make lean apply/undo mechanism instead of copying */
         struct pos poscpy = *pos;
         enum piece mailbox_cpy[SQ_INDEX_COUNT];
-        memcpy(mailbox_cpy, mailbox, sizeof mailbox_cpy);
+        my_memcpy(mailbox_cpy, mailbox, sizeof mailbox_cpy);
         size_t old_hist_length = hist->length;
 
         enum move_result const r = board_move(&poscpy, hist, mailbox_cpy, m);
 
         double score;
-        if (r == MR_STALEMATE) {
+        if (r == MR_STALEMATE || r == MR_REPEATS) {
             score = 0.0;
         } else {
             score = -alphabeta_search(&poscpy,
@@ -2045,6 +1961,7 @@ struct search_option alphabeta_search(struct pos const* pos,
                                       mailbox_cpy,
                                       opposite_player(us),
                                       depth - 1,
+                                      mattr_filter,
                                       -beta,
                                       -alpha).score;
         }
@@ -2089,15 +2006,19 @@ struct search_option alphabeta_search(struct pos const* pos,
     return out;
 }
 
-struct move search(struct board* b, enum player us, int8_t max_depth)
+static struct search_result {struct move move; double score;}
+search(struct board* b, enum player us, int8_t max_depth)
 {
+#if 1
     if (b->tt.entries == NULL) {
-        b->tt.entries = calloc(TT_ENTRIES, sizeof b->tt.entries[0]);
+        b->tt.entries = sys_mmap_anon_shared(TT_ENTRIES * sizeof b->tt.entries[0],
+                                             SYS_PROT_READ | SYS_PROT_WRITE,
+                                             SYS_MADV_RANDOM);
         if (b->tt.entries == NULL) {
-            perror("calloc");
-            exit(EXIT_FAILURE);
+			__builtin_trap();
         }
     }
+#endif
 
     struct move best_move = {0};
 
@@ -2106,13 +2027,13 @@ struct move search(struct board* b, enum player us, int8_t max_depth)
 #define SCORE_INF 1e80
 
     for (int8_t d = 1; d <= max_depth; ++d) {
-        double window = 0.5;
+        double window = 2.0;
         double alpha = score - window;
         double beta = score + window;
 
         while (true) {
             struct search_option so =
-                alphabeta_search(&b->pos, &b->hist, &b->tt, b->mailbox, us, d, alpha, beta);
+                alphabeta_search(&b->pos, &b->hist, &b->tt, b->mailbox, us, d, 0, alpha, beta);
 
             if (so.score > alpha && so.score < beta) {
                 score = so.score;
@@ -2132,136 +2053,11 @@ struct move search(struct board* b, enum player us, int8_t max_depth)
             }
 
         }
-        fprintf(stderr, "depth: %d\n", d);
     }
 
 #undef SCORE_INF
 
-    return best_move;
+    return (struct search_result){.move = best_move, .score = score};
 }
 
 
-static void board_print(const struct pos* pos, struct move* move, FILE* out)
-{
-    int buf[8][8] = {0};
-
-    for (enum player player = PLAYER_BEGIN; player < PLAYER_COUNT; ++player) {
-        for (enum piece piece = PIECE_BEGIN; piece < PIECE_COUNT; ++piece) {
-            bitboard x = pos->pieces[player][piece];
-
-            for (index i = 7; i < 8; i--) {
-                for (index j = 0; j < 8; ++j) {
-                    if (x & (1ULL<<(i*8+j))) {
-                        buf[i][j] = piece_unicode[player][piece];
-                    }
-                }
-            }
-        }
-    }
-
-    /* see: https://en.wikipedia.org/wiki/ANSI_escape_code#Colors */
-    setlocale(LC_ALL, "");
-    for (index i = 7; i < 8; i--) {
-        fprintf(out, "\033[0m"); /* reset background color */
-        fprintf(out, "%"INDEX_FMT" ", i+1);
-        for (index j = 0; j < 8; ++j) {
-            index const n = INDEX_FROM_RF(i,j);
-            if (move && n == move->from) {
-                fprintf(out, "\033[%d;%dm", 30, 104); /* 44: blue*/
-            } else if (move && n == move->to) {
-                fprintf(out, "\033[%d;%dm", 30, 44); /* 104: bright blue*/
-            } else {
-                /* 45: magenta, 47: white */
-                fprintf(out, "\033[%d;%dm", 30, (i+j) % 2 ? 45 : 47);
-            }
-            if (buf[i][j]) {
-                fprintf(out, "%lc ", buf[i][j]);
-            } else {
-                fprintf(out, "  "); /* idk why this hack is needed but "%lc "
-                                       is not working when buf[i][j] = ' ' */
-            }
-        }
-        fprintf(out, "\033[0m"); /* reset background color */
-        fprintf(out, "\n");
-    }
-    fprintf(out, "  A B C D E F G H \n");
-}
-
-static void bitboard_print(bitboard b, FILE* out)
-{
-    setlocale(LC_ALL, "");
-    fprintf(out, "\n");
-    for (index i = 7; i < 8; i--) {
-        fprintf(out, "\033[0m"); /* reset background color */
-        fprintf(out, "%"INDEX_FMT" ", i+1);
-        for (index j = 0; j < 8; ++j) {
-            index const n = INDEX_FROM_RF(i,j);
-            int color;
-            if ((b >> n) & 1) {
-                /* 41: red */
-                color = 41;
-            } else {
-                /* 45: magenta, 47: white */
-                color = (i+j)%2 ? 45 : 47;
-            }
-            fprintf(out, "\033[30;%dm", color);
-            fprintf(out, "  ");
-        }
-        fprintf(out, "\033[0m"); /* reset background color */
-        fprintf(out, "\n");
-    }
-    fprintf(out, "  A B C D E F G H \n");
-}
-
-static void board_print_threats(const struct pos* pos, FILE* out, struct move* move)
-{
-    enum player const player = pos->player;
-    int buf[8][8] = {0};
-
-    bitboard const threats = all_threats_from_player(pos, player);
-
-    for (enum player player = PLAYER_BEGIN; player < PLAYER_COUNT; ++player) {
-        for (enum piece piece = PIECE_BEGIN; piece < PIECE_COUNT; ++piece) {
-            bitboard x = pos->pieces[player][piece];
-
-            for (index i = 7; i < 8; i--) {
-                for (index j = 0; j < 8; ++j) {
-                    if (x & (1ULL<<(i*8+j))) {
-                        buf[i][j] = piece_unicode[player][piece];
-                    }
-                }
-            }
-        }
-    }
-
-    /* see: https://en.wikipedia.org/wiki/ANSI_escape_code#Colors */
-    setlocale(LC_ALL, ""); /* needed for unicode symbols */
-    for (index i = 7; i < 8; i--) {
-        fprintf(out, "\033[0m"); /* reset background color */
-        fprintf(out, "%"INDEX_FMT" ", i+1);
-        for (index j = 0; j < 8; ++j) {
-            index const n = INDEX_FROM_RF(i,j);
-
-            if (move && n == move->from) {
-                fprintf(out, "\033[%d;%dm", 30, 44); /* 44: blue*/
-            } else if (move && n == move->to) {
-                fprintf(out, "\033[%d;%dm", 30, 44); /* 104: bright blue*/
-            }
-            else if ((threats >> n) & 1) {
-                fprintf(out, "\033[%d;%dm", 30, 41); /* 41: red */
-            } else {
-                /* 45: magenta, 47: white */
-                fprintf(out, "\033[%d;%dm", 30, (i+j) % 2 ? 45 : 47);
-            }
-            if (buf[i][j]) {
-                fprintf(out, "%lc ", buf[i][j]);
-            } else {
-                fprintf(out, "  "); /* idk why this hack is needed but "%lc "
-                                       is not working when buf[i][j] = ' ' */
-            }
-        }
-        fprintf(out, "\033[0m"); /* reset background color */
-        fprintf(out, "\n");
-    }
-    fprintf(out, "  A B C D E F G H \n");
-}

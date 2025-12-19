@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Wasm Loader</title>
+    <script type="module" src="./chess.js" defer></script>
+
+	<style>
+	  #board {
+		display: grid;
+		grid-template-columns: repeat(8, 60px);
+		grid-template-rows: repeat(8, 60px);
+		width: 480px;
+	  }
+
+	  .square {
+		width: 60px;
+		height: 60px;
+		font-size: 57px;
+	  }
+
+	  .square.light {
+		background: #f0d9b5;
+	  }
+
+	  .square.dark {
+		background: #b58863;
+	  }
+</style>
+
+</head>
+<body>
+	<div id="board"></div>
+</body>
+</html>
