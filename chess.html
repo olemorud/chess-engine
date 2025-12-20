@@ -5,31 +5,37 @@
     <title>Wasm Loader</title>
     <script type="module" src="./chess.js" defer></script>
 
-	<style>
-	  #board {
-		display: grid;
-		grid-template-columns: repeat(8, 60px);
-		grid-template-rows: repeat(8, 60px);
-		width: 480px;
-	  }
+    <style>
+      #board {
+        display: grid;
+        grid-template-columns: repeat(8, 60px);
+        grid-template-rows: repeat(8, 60px);
+        width: 480px;
+      }
 
-	  .square {
-		width: 60px;
-		height: 60px;
-		font-size: 57px;
-	  }
+      .square {
+        width: 60px;
+        height: 60px;
+        font-size: 55px;
+        text-align: center;
+      }
 
-	  .square.light {
-		background: #f0d9b5;
-	  }
+      .square.light {
+        background: #f0d9b5;
+      }
 
-	  .square.dark {
-		background: #b58863;
-	  }
+      .square.dark {
+        background: #b58863;
+      }
+
+      .square.blue {
+        background: blue;
+      }
 </style>
 
 </head>
 <body>
-	<div id="board"></div>
+    <div id="board"></div>
+    <p id="result"></div>
 </body>
 </html>

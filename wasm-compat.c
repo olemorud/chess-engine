@@ -40,9 +40,21 @@ uint64_t wb_search(int8_t max_depth)
 
 int32_t wb_move(uint32_t move)
 {
-	struct move m = move_deserialize(move);
-	enum move_result const r = board_move_2(&g_board, m);
-	return (int32_t)r;
+	struct move const m = move_deserialize(move);
+	enum move_result const mr = board_move_2(&g_board, m);
+
+	/* TODO: this checkmate/stalemate check needs to be abstracted better */
+	if (mr == MR_STALEMATE) {
+		return (int32_t)MR_STALEMATE;
+	}
+	struct move moves[MOVE_MAX];
+	size_t move_count = 0ULL;
+	all_moves(&g_board.pos, opposite_player(g_board.pos.player), &move_count, moves);
+	if (move_count == 0ULL) {
+		return MR_CHECKMATE;
+	}
+
+	return (int32_t)mr;
 }
 
 void wb_init()

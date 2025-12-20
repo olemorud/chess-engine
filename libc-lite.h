@@ -7,12 +7,12 @@
 
 static uint64_t g_rand_seed = 1;
 
-void my_srand(uint64_t n)
+static void my_srand(uint64_t n)
 {
     g_rand_seed = n == 0 ? 1 : n;
 }
 
-uint64_t my_rand64()
+static uint64_t my_rand64()
 {
     /* 
      * Xorshift RNG [1] + multiply
@@ -37,7 +37,7 @@ static int my_isdigit(int ch)
     return ch >= '0' && ch <= '9';
 }
 
-void* my_memset(void *b, int c, size_t len)
+static void* my_memset(void *b, int c, size_t len)
 {
     unsigned char* x = b;
     unsigned char ch = (unsigned char)c;
@@ -47,7 +47,7 @@ void* my_memset(void *b, int c, size_t len)
     return b;
 }
 
-void* my_memcpy(void* restrict dst, void const* restrict src, size_t n)
+static void* my_memcpy(void* restrict dst, void const* restrict src, size_t n)
 {
     uint8_t* d = dst;
     uint8_t const* s = src;
@@ -73,7 +73,7 @@ int my_memcmp(void const* s1, void const* s2, size_t n)
     return 0;
 }
 
-size_t strlen(char const* s)
+static size_t strlen(char const* s)
 {
     size_t n = 0;
     while (s[n++])

@@ -1,0 +1,7 @@
+codegen
+chess.wasm
+mbb_bishop.h
+mbb_rook.h
+tests
+*.dSYM
+between_lookup.h
