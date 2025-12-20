@@ -18,11 +18,13 @@ CFLAGS :=  $(CFLAGS.$(CC)) $(CFLAGS.$(CC).$(BUILD))
 
 all: tests
 
+wasm: chess.wasm
+
 codegen: codegen.c
 	$(CC) -o $@ $(CFLAGS) $^
 
-wasm: wasm-compat.c
-	$(CC) -DWASM -o chess.wasm wasm-compat.c $(CFLAGS.$(CC)) $(CFLAGS.$(CC).wasm) 
+chess.wasm: wasm-compat.c
+	$(CC) -DWASM -o $@ wasm-compat.c $(CFLAGS.$(CC)) $(CFLAGS.$(CC).wasm) 
 
 mbb_rook.h: codegen
 	./codegen
