@@ -39,6 +39,12 @@ int main()
 
     bitboard between_lookup[SQ_INDEX_COUNT][SQ_INDEX_COUNT];
 
+    bitboard diagonals[SQ_INDEX_COUNT];
+
+    for (enum square_index sq = SQ_INDEX_BEGIN; sq < SQ_INDEX_COUNT; ++sq) {
+        diagonals[sq] = diagonals_from_index(sq);
+    }
+
     for (enum square_index sq_index = SQ_INDEX_BEGIN; sq_index < SQ_INDEX_COUNT; ++sq_index) {
         enum file_index file = index_to_file(sq_index);
         enum rank_index rank = index_to_rank(sq_index);
@@ -167,6 +173,23 @@ int main()
 #define TAB "    "
 #define NL "\n"
 
+    { /* diagonals */
+        FILE* f = fopen("diagonals.h", "w");
+        if (!f) {
+            perror("fopen");
+            exit(EXIT_FAILURE);
+        }
+
+        fprintf(f, "static const bitboard diagonals[SQ_INDEX_COUNT] = {\n");
+        for (enum square_index i = SQ_INDEX_BEGIN; i < SQ_INDEX_COUNT; ++i) {
+            fprintf(f, "[%s] = 0x%016"BITBOARD_FMT_X",\n",
+                    square_index_str[i],
+                    diagonals[i]);
+        }
+        fprintf(f,"};\n");
+        fclose(f);
+    }
+
     { /* rooks */
         FILE* f = fopen("mbb_rook.h", "w");
         if (!f) {
@@ -237,6 +260,7 @@ int main()
             fprintf(f, "\n},\n");
         }
         fprintf(f,"};\n");
+        fclose(f);
     }
 
     { /* between table */
@@ -255,6 +279,7 @@ int main()
             fprintf(f, "\n},\n");
         }
         fprintf(f,"};\n");
+        fclose(f);
     }
 
 #undef TAB
