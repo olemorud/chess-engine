@@ -4,6 +4,7 @@
 #include "sys.h"
 
 #include <stdint.h>
+#include <stdatomic.h>
 
 #ifndef NDEBUG
 #define assert(expr) \
@@ -444,19 +445,17 @@ static inline enum rank_index index_to_rank(enum square_index p)
 
 static bitboard cardinals_from_index(enum square_index p)
 {
-    /* might benefit from a lookup table */
-    return (FILE_MASK(index_to_file(p)) | RANK_MASK(index_to_rank(p)))
-        & ~SQ_MASK_FROM_INDEX(p);
+    return (FILE_MASK(index_to_file(p)) | RANK_MASK(index_to_rank(p)));
 }
 
 static bitboard diagonals_from_index(enum square_index sq)
 {
+#ifdef CODEGEN
     enum rank_index const rank = index_to_rank(sq);
     enum file_index const file = index_to_file(sq);
 
     bitboard mask = 0ULL;
 
-    /* Ensure signed-underflow detection rules match your style */
     _Static_assert(((enum rank_index)-1) > 0, "rank_index must be unsigned");
     _Static_assert(((enum file_index)-1) > 0, "file_index must be unsigned");
 
@@ -469,7 +468,6 @@ static bitboard diagonals_from_index(enum square_index sq)
         mask |= SQ_MASK_FROM_RF(r, f);
     }
 
-    /* NW (rank+1, file-1) */
     for (r = rank+1, f = file-1;
          r <= RANK_INDEX_8 && f <= FILE_INDEX_H;
          ++r, --f)
@@ -477,7 +475,6 @@ static bitboard diagonals_from_index(enum square_index sq)
         mask |= SQ_MASK_FROM_RF(r, f);
     }
 
-    /* SE (rank-1, file+1) */
     for (r = rank-1, f = file+1;
          r <= RANK_INDEX_8 && f <= FILE_INDEX_H;
          --r, ++f)
@@ -485,15 +482,21 @@ static bitboard diagonals_from_index(enum square_index sq)
         mask |= SQ_MASK_FROM_RF(r, f);
     }
 
-    /* SW (rank-1, file-1) */
     for (r = rank-1, f = file-1;
          r <= RANK_INDEX_8 && f <= FILE_INDEX_H;
          --r, --f)
     {
         mask |= SQ_MASK_FROM_RF(r, f);
     }
-
     return mask;
+
+#else
+    #if ! __has_include("diagonals.h")
+        #error "compile with -DCODEGEN and run once to generate required header files"
+    #endif
+    #include "diagonals.h" /* defines static bitboard diagonals[SQ_INDEX_COUNT]; */
+    return diagonals[sq];
+#endif
 }
 
 
@@ -914,13 +917,13 @@ struct board {
     enum piece mailbox[SQ_INDEX_COUNT];
 };
 
-static void move_compute_appeal(struct move*      m,
-                                struct pos const* pos,
-                                enum player       us,
-                                enum piece        mailbox[restrict static SQ_INDEX_COUNT])
+static void move_compute_appeal(struct move* restrict      m,
+                                struct pos const* restrict pos,
+                                enum player                us,
+                                enum piece                 mailbox[restrict static SQ_INDEX_COUNT])
 {
-    enum player them = opposite_player(us);
     /* MVV-LVA: https://www.chessprogramming.org/MVV-LVA */
+    enum player them = opposite_player(us);
     enum piece const atk = mailbox[m->from];
 
     uint8_t n = 1;
@@ -928,7 +931,10 @@ static void move_compute_appeal(struct move*      m,
         n += (uint8_t)piece_value[mailbox[m->to]];
     }
 
-    m->appeal = 16*n - (uint8_t)piece_value[atk];
+    uint8_t mmv_lva_bonus = 16*n - (uint8_t)piece_value[atk];
+    assert((uint8_t)16*n > (uint8_t)piece_value[atk]);
+
+    m->appeal = mmv_lva_bonus;
 }
 
 #define BOARD_INIT (struct board) {                       \
@@ -999,6 +1005,21 @@ static void move_compute_appeal(struct move*      m,
         [SQ_INDEX_H8] = PIECE_ROOK,                       \
     },                                                    \
     .hist = {0},                                          \
+}
+
+void board_init(struct board* b)
+{
+    if (b->pos.fullmoves == 0 && b->pos.hash == 0) {
+        *b = BOARD_INIT;
+    }
+    if (b->tt.entries == NULL) {
+        b->tt.entries = sys_mmap_anon_shared(TT_ENTRIES * sizeof b->tt.entries[0],
+                                             SYS_PROT_READ | SYS_PROT_WRITE,
+                                             SYS_MADV_RANDOM);
+        if (b->tt.entries == NULL) {
+            __builtin_trap();
+        }
+    }
 }
 
 static bool board_load_fen_unsafe(struct board* b, char const* fen_str)
@@ -1517,6 +1538,29 @@ static inline void tt_insert(struct tt* tt, uint64_t hash, struct search_option 
 #endif
 }
 
+/* tt_insert_maybe inserts only if heuristics say it's a good idea. There are
+ * two considerations:
+ * - higher depth saves more work per probe hit
+ * - entries closer to the leaves are more likely to be searched multiple time
+ */
+static inline void tt_insert_maybe(struct tt* tt, uint64_t hash, struct search_option so)
+{
+    uint64_t const addr = hash % TT_ENTRIES; 
+
+#if 0
+    struct search_option* tte = &tt->entries[addr];
+    if (so.depth < tte->depth) {
+        *tte = so;
+    }
+#endif
+
+    so.init = true;
+    tt->entries[addr] = so;
+#ifndef NDEBUG
+    tt->insertions += 1;
+#endif
+}
+
 enum move_result {
     MR_NORMAL,
     MR_CHECK,
@@ -1708,10 +1752,10 @@ static enum move_result board_move_2(struct board* b, struct move move)
                       move);
 }
 
-/*
- * Placeholder heuristic
- *
- * */
+
+/* --------------------------- MOVE SEARCH --------------------------------- */
+#include "evaluations.h"
+
 static double board_score_heuristic(struct pos const* pos)
 {
     /* this function always evaluates from white's perspective before
@@ -1723,7 +1767,11 @@ static double board_score_heuristic(struct pos const* pos)
  - static struct {bitboard const area; double const val} const
   positional_modifier[PLAYER_COUNT][POSITIONAL_MODIFIER_COUNT][PIECE_COUNT];
      * */
-#include "evaluations.h"
+    bitboard const occw = pos->occupied[PLAYER_WHITE];
+    bitboard const occb = pos->occupied[PLAYER_BLACK];
+    bitboard const occall = occw | occb;
+
+    enum game_progress const gp = endgameness(pos);
 
     for (enum piece p = PIECE_BEGIN; p < PIECE_COUNT; ++p) {
         /* raw material value */
@@ -1731,33 +1779,34 @@ static double board_score_heuristic(struct pos const* pos)
             ((double)bitboard_popcount(pos->pieces[PLAYER_WHITE][p]) -
              (double)bitboard_popcount(pos->pieces[PLAYER_BLACK][p]));
 
-        /* pawns defending pieces are desired */
-        score += 0.05 * (
-            (double)bitboard_popcount(
-                pawn_attacks_white(pos->pieces[PLAYER_WHITE][PIECE_PAWN])
-                & pos->pieces[PLAYER_WHITE][p]
-            )
-            - (double)bitboard_popcount(
-                pawn_attacks_black(pos->pieces[PLAYER_WHITE][PIECE_PAWN])
-                & pos->pieces[PLAYER_WHITE][p]
-            )
-        );
+        /* very minor advantage for threat projection to break tied moves */
+        score += 0.001 * (
+            (double)bitboard_popcount(piece_attacks(p, PLAYER_WHITE, 0, p, occall, 0))
+          - (double)bitboard_popcount(piece_attacks(p, PLAYER_BLACK, 0, p, occall, 0)));
 
         /* positional bonus, see evaluations.h */
         for (size_t i = 0; i < POSITIONAL_MODIFIER_COUNT; ++i) {
-            score += positional_modifier[PLAYER_WHITE][i][p].val *
+            score += positional_modifier(PLAYER_WHITE, gp, i, p).val *
                 (
                  (double)bitboard_popcount(
                     pos->pieces[PLAYER_WHITE][p]
-                  & positional_modifier[PLAYER_WHITE][i][p].area
-                 )
+                  & positional_modifier(PLAYER_WHITE, gp, i, p).area)
                - (double)bitboard_popcount(
                      pos->pieces[PLAYER_BLACK][p]
-                   & positional_modifier[PLAYER_BLACK][i][p].area
-                 )
+                  & positional_modifier(PLAYER_BLACK, gp, i, p).area)
                );
         }
     }
+
+    /* pawns defending pieces are desired */
+    score += 0.05 * (
+        (double)bitboard_popcount(
+            pawn_attacks_white(pos->pieces[PLAYER_WHITE][PIECE_PAWN]) & occw
+        )
+        - (double)bitboard_popcount(
+            pawn_attacks_black(pos->pieces[PLAYER_BLACK][PIECE_PAWN]) & occb
+        )
+    );
 
     /* stacked pawns are bad */
     const double k = 0.30;
@@ -1859,68 +1908,6 @@ double quiesce(struct pos const* pos,
     return highscore;
 }
 
-struct ab_frame {
-    enum search_stage {
-        ST_INIT = 0,
-        ST_LOOP = 1,
-        ST_WAIT_CHILD = 2,
-    } stage;
-
-    struct pos pos;
-    enum piece mailbox[SQ_INDEX_COUNT];
-    enum player us;
-    int8_t depth;
-    uint64_t mattr_filter;
-
-    double alpha;
-    double beta;
-    double alpha_orig;
-
-    struct search_option tte;
-
-    struct move moves[MOVE_MAX];
-    size_t move_count;
-
-    double best_score;
-    struct move best_move;
-
-    size_t old_hist_length;
-    struct move pending_move;
-
-    struct search_option result;
-};
-
-static inline void ab_update_parent_after_score(struct ab_frame *parent,
-                                                struct tt *tt,
-                                                struct move m,
-                                                double score)
-{
-    if (score > parent->best_score) {
-        parent->best_score = score;
-        parent->best_move  = m;
-    }
-
-    if (score > parent->alpha) {
-        parent->alpha = score;
-    }
-
-    if (parent->alpha >= parent->beta) {
-        struct search_option out = {
-            .score = parent->alpha,
-            .move  = parent->best_move,
-            .depth = parent->depth,
-            .hash  = parent->pos.hash,
-            .init  = true,
-            .flag  = TT_LOWER,
-        };
-        tt_insert(tt, parent->pos.hash, out);
-        parent->result = out;
-
-        /* mark parent as complete so it will be popped in st_wait_child. */
-        parent->stage = ST_WAIT_CHILD;
-    }
-}
-
 static
 struct search_option alphabeta_search(struct pos const* pos,
                                       struct history*   hist,
@@ -1928,265 +1915,167 @@ struct search_option alphabeta_search(struct pos const* pos,
                                       enum piece        mailbox[restrict static SQ_INDEX_COUNT],
                                       enum player       us,
                                       int8_t            depth,
-                                      uint64_t          mattr_filter,
                                       double            alpha,
-                                      double            beta)
+                                      double            beta,
+                                      atomic_bool*      searching)
 {
-    struct {
-        struct ab_frame stack[50];
-        size_t len;
-    } ab_stack = {0};
+    if (depth <= 0) {
+        double sc = quiesce(pos, mailbox, us, alpha, beta, 0);
+        return (struct search_option){
+            .score = sc,
+            .move  = (struct move){0},
+            .depth = 0,
+            .hash  = pos->hash,
+            .init  = true,
+            .flag  = TT_EXACT,
+        };
+    }
 
-#define STACK_PUSH(s, x) \
-    do { \
-        assert(s.len < sizeof s.stack / sizeof s.stack[0]); \
-        (s.stack)[(s.len)++] = (x); \
-    } while (0)
-#define STACK_TOP(s)   &(s.stack)[(s.len) - 1]
-#define STACK_POP(s)   (assert(s.len > 0), s.stack[--(s.len)]);
-#define STACK_EMPTY(s) (s.len == 0)
+    double const alpha_orig = alpha;
 
-    struct ab_frame root = {
-        .stage = ST_INIT,
-        .pos = *pos,
-        .us = us,
-        .depth = depth,
-        .mattr_filter = mattr_filter,
-        .alpha = alpha,
-        .beta = beta
-    };
-    my_memcpy(root.mailbox, mailbox, sizeof root.mailbox);
+    struct search_option tte = tt_get(tt, pos->hash);
+    if (tte.init && tte.hash == pos->hash && tte.depth >= depth) {
+        if (tte.flag == TT_EXACT) {
+            return tte;
+        } else if (tte.flag == TT_LOWER) {
+            if (tte.score > alpha) alpha = tte.score;
+        } else if (tte.flag == TT_UPPER) {
+            if (tte.score < beta)  beta  = tte.score;
+        }
 
-    STACK_PUSH(ab_stack, root);
-
-    while (1) {
-        struct ab_frame *fr = STACK_TOP(ab_stack);
-
-        switch (fr->stage) {
-
-        case ST_INIT: {
-            if (fr->depth <= 0) {
-                fr->result = (struct search_option) {
-                    .score = quiesce(&fr->pos, fr->mailbox, fr->us,
-                                     fr->alpha, fr->beta, 0),
-                    .move  = (struct move){0},
-                    .depth = 0,
-                    .hash  = fr->pos.hash,
-                    .init  = true,
-                    .flag  = TT_EXACT,
-                };
-                fr->stage = ST_WAIT_CHILD;
-                break;
-            }
-
-            fr->alpha_orig = fr->alpha;
-
-            fr->tte = tt_get(tt, fr->pos.hash);
-            if (fr->tte.init && fr->tte.hash == fr->pos.hash && fr->tte.depth >= fr->depth) {
-                if (fr->tte.flag == TT_EXACT) {
-                    fr->result = fr->tte;
-                    fr->stage  = ST_WAIT_CHILD;
-                    break;
-                } else if (fr->tte.flag == TT_LOWER) {
-                    if (fr->tte.score > fr->alpha) {
-                        fr->alpha = fr->tte.score;
-                    }
-                } else if (fr->tte.flag == TT_UPPER) {
-                    if (fr->tte.score < fr->beta) {
-                        fr->beta = fr->tte.score;
-                    }
-                }
-
-                if (fr->alpha >= fr->beta) {
-                    fr->result = fr->tte;
-                    fr->stage  = ST_WAIT_CHILD;
-                    break;
-                }
-            }
-
-            fr->move_count = 0;
-            all_moves(&fr->pos, fr->us, &fr->move_count, fr->moves);
-
-            /* checkmate or stalemate */
-            if (fr->move_count == 0) {
-                double score = 0.0;
-                if (attacks_to(&fr->pos,
-                               fr->pos.pieces[fr->us][PIECE_KING],
-                               0ULL, 0ULL) != 0ULL) {
-                    score = -(999.0 + (double)fr->depth);
-                }
-
-                fr->result = (struct search_option) {
-                    .score = score,
-                    .move  = (struct move){0},
-                    .depth = fr->depth,
-                    .hash  = fr->pos.hash,
-                    .init  = true,
-                    .flag  = TT_EXACT,
-                };
-                fr->stage = ST_WAIT_CHILD;
-                break;
-            }
-
-            for (size_t i = 0; i < fr->move_count; ++i) {
-                move_compute_appeal(&fr->moves[i], &fr->pos, fr->us, fr->mailbox);
-            }
-
-            /* put existing TT entry first */
-            if (fr->tte.init && fr->tte.hash == fr->pos.hash) {
-                for (size_t i = 0; i < fr->move_count; ++i) {
-                    if (fr->moves[i].from == fr->tte.move.from &&
-                        fr->moves[i].to   == fr->tte.move.to) {
-                        fr->moves[i].appeal = APPEAL_MAX;
-                        break;
-                    }
-                }
-            }
-
-            fr->best_score = -1e300;
-            fr->best_move  = fr->moves[0];
-            fr->stage      = ST_LOOP;
-        } break;
-
-        case ST_LOOP: {
-            if (fr->result.init) {
-                fr->stage = ST_WAIT_CHILD;
-                break;
-            }
-
-            if (fr->move_count == 0) {
-                enum tt_flag flag = TT_EXACT;
-                if (fr->best_score <= fr->alpha_orig) flag = TT_UPPER;
-
-                fr->result = (struct search_option) {
-                    .score = fr->best_score,
-                    .move  = fr->best_move,
-                    .depth = fr->depth,
-                    .hash  = fr->pos.hash,
-                    .init  = true,
-                    .flag  = flag,
-                };
-                tt_insert(tt, fr->pos.hash, fr->result);
-                fr->stage = ST_WAIT_CHILD;
-                break;
-            }
-
-            struct move m = moves_linear_search(fr->moves, &fr->move_count);
-
-            if (fr->mattr_filter && !(m.attr & fr->mattr_filter)) {
-                break;
-            }
-
-            fr->old_hist_length = hist->length;
-
-            struct pos child_pos = fr->pos;
-            enum piece child_mailbox[SQ_INDEX_COUNT];
-            my_memcpy(child_mailbox, fr->mailbox, sizeof child_mailbox);
-
-            enum move_result const r = board_move(&child_pos, hist, child_mailbox, m);
-
-            if (r == MR_STALEMATE || r == MR_REPEATS) {
-                hist->length = fr->old_hist_length;
-                ab_update_parent_after_score(fr, tt, m, 0.0);
-                break;
-            }
-
-            if (fr->depth - 1 <= 0) {
-                double score = -quiesce(&child_pos,
-                                        child_mailbox,
-                                        opposite_player(fr->us),
-                                        -fr->beta,
-                                        -fr->alpha,
-                                        0);
-
-                hist->length = fr->old_hist_length;
-                ab_update_parent_after_score(fr, tt, m, score);
-                break;
-            }
-
-            fr->pending_move = m;
-            fr->stage = ST_WAIT_CHILD;
-
-            struct ab_frame child = {0};
-            child.stage        = ST_INIT;
-            child.pos          = child_pos;
-            my_memcpy(child.mailbox, child_mailbox, sizeof child.mailbox);
-            child.us           = opposite_player(fr->us);
-            child.depth        = fr->depth - 1;
-            child.mattr_filter = fr->mattr_filter;
-            child.alpha        = -fr->beta;
-            child.beta         = -fr->alpha;
-
-            STACK_PUSH(ab_stack, child);
-        } break;
-
-        case ST_WAIT_CHILD: {
-            struct search_option out = fr->result;
-            STACK_POP(ab_stack);
-
-            if (STACK_EMPTY(ab_stack)) {
-                return out;
-            }
-
-            struct ab_frame *parent = STACK_TOP(ab_stack);
-
-            if (parent->stage == ST_WAIT_CHILD) {
-                /* parent is waiting on a child (this frame), propagate */
-                double score = -out.score;
-                struct move m = parent->pending_move;
-
-                hist->length = parent->old_hist_length;
-
-                /* resume parent move loop. */
-                parent->stage = ST_LOOP;
-
-                ab_update_parent_after_score(parent, tt, m, score);
-            } else {
-                /* parent wasn't waiting: treat as a completed frame result being
-                   propagated through a completion chain. */
-                parent->result = out;
-                parent->stage  = ST_WAIT_CHILD;
-            }
-        } break;
-
-        default: {
-            /* unreachable */
-            assert(0);
-            __builtin_unreachable();
-        } break;
-
+        if (alpha >= beta) {
+            return tte;
         }
     }
+
+    struct move moves[MOVE_MAX];
+    size_t move_count = 0;
+    all_moves(pos, us, &move_count, moves);
+
+    /* checkmate or stalemate */
+    if (move_count == 0) {
+        double score = 0.0;
+        if (attacks_to(pos,
+                       pos->pieces[us][PIECE_KING],
+                       0ULL, 0ULL) != 0ULL) {
+            score = -(999.0 + (double)depth);
+        }
+
+        return (struct search_option){
+            .score = score,
+            .move  = (struct move){0},
+            .depth = depth,
+            .hash  = pos->hash,
+            .init  = true,
+            .flag  = TT_EXACT,
+        };
+    }
+
+    for (size_t i = 0; i < move_count; ++i) {
+        move_compute_appeal(&moves[i], pos, us, mailbox);
+    }
+
+    /* put existing TT move first */
+    if (tte.init && tte.hash == pos->hash) {
+        for (size_t i = 0; i < move_count; ++i) {
+            if (moves[i].from == tte.move.from &&
+                moves[i].to   == tte.move.to) {
+                moves[i].appeal = APPEAL_MAX;
+                break;
+            }
+        }
+    }
+
+    double best_score = -1e300;
+    struct move best_move = moves[0];
+
+    while (move_count > 0 && atomic_load_explicit(searching, memory_order_relaxed)) {
+        struct move m = moves_linear_search(moves, &move_count);
+
+        size_t const old_hist_len = hist->length;
+        struct pos pos_cpy = *pos;
+        enum piece mailbox_cpy[SQ_INDEX_COUNT];
+        my_memcpy(mailbox_cpy, mailbox, sizeof mailbox_cpy);
+
+        enum move_result r = board_move(&pos_cpy, hist, mailbox_cpy, m);
+
+        double score;
+
+        if (r == MR_STALEMATE || r == MR_REPEATS) {
+            score = 0.0;
+        } else {
+            score = -alphabeta_search(&pos_cpy,
+                              hist,
+                              tt,
+                              mailbox_cpy,
+                              opposite_player(us),
+                              depth - 1,
+                              -beta,
+                              -alpha,
+                              searching).score;
+        }
+
+        hist->length = old_hist_len;
+
+        if (score > best_score) {
+            best_score = score;
+            best_move = m;
+        }
+        if (score > alpha) {
+            alpha = score;
+        }
+        if (alpha >= beta) {
+            break;
+        }
+    }
+
+    enum tt_flag flag = TT_EXACT;
+    if (best_score <= alpha_orig) {
+        flag = TT_UPPER;
+    }
+    else if (best_score >= beta) {
+        flag = TT_LOWER;
+    }
+
+    struct search_option out = (struct search_option){
+        .score = best_score,
+        .move  = best_move,
+        .depth = depth,
+        .hash  = pos->hash,
+        .init  = true,
+        .flag  = flag,
+    };
+
+    tt_insert(tt, pos->hash, out);
+
+    return out;
 }
 
 static struct search_result {struct move move; double score;}
-search(struct board* b, enum player us, int8_t max_depth)
+search(struct board* b, enum player us, int8_t max_depth, atomic_bool* searching)
 {
-#if 1
-    if (b->tt.entries == NULL) {
-        b->tt.entries = sys_mmap_anon_shared(TT_ENTRIES * sizeof b->tt.entries[0],
-                                             SYS_PROT_READ | SYS_PROT_WRITE,
-                                             SYS_MADV_RANDOM);
-        if (b->tt.entries == NULL) {
-            __builtin_trap();
-        }
-    }
-#endif
+    struct move moves[MOVE_MAX];
+    size_t move_count = 0;
+    all_moves(&b->pos, us, &move_count, moves);
 
-    struct move best_move = {0};
+    assert(move_count);
 
+    struct move best_move = moves[0];
+
+#define SCORE_INF 1e300
     double score = 0.0;
 
-#define SCORE_INF 1e80
-
-    for (int8_t d = 1; d <= max_depth; ++d) {
-        double window = 2.0;
+    for (int8_t d = 1;
+         d <= max_depth && atomic_load_explicit(searching, memory_order_relaxed);
+         ++d)
+    {
+        double window = 1000; /* temp debug solution */
         double alpha = score - window;
         double beta = score + window;
 
-        while (true) {
+        while (atomic_load_explicit(searching, memory_order_relaxed)) {
             struct search_option so =
-                alphabeta_search(&b->pos, &b->hist, &b->tt, b->mailbox, us, d, 0, alpha, beta);
+                alphabeta_search(&b->pos, &b->hist, &b->tt, b->mailbox, us, d, alpha, beta, searching);
 
             if (so.score > alpha && so.score < beta) {
                 score = so.score;
@@ -2196,12 +2085,11 @@ search(struct board* b, enum player us, int8_t max_depth)
 
             window *= 2;
 
-            alpha = score - window;
-            beta = score + window;
-            
             if (so.score <= alpha) {
                 alpha = -SCORE_INF;
+                beta = score + window;
             } else {
+                alpha = score - window;
                 beta = SCORE_INF;
             }
 

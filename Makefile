@@ -7,7 +7,7 @@ CFLAGS.gcc.release := -Ofast
 CFLAGS.gcc.debug := -ggdb -O0 -fsanitize=address
 
 CFLAGS.clang := -std=c23 -Wall -Wextra -Wconversion -Wno-unused-function -Wimplicit-int-conversion
-CFLAGS.clang.release := -Ofast
+CFLAGS.clang.release := -Ofast -march=native
 CFLAGS.clang.debug := -ggdb -O0 -fsanitize=address
 CFLAGS.clang.wasm := \
 	--target=wasm32-unknown-unknown -O3 -nostdlib \

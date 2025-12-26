@@ -172,20 +172,20 @@ static void board_print_fen(struct pos const* pos, FILE* out)
 
     if (pos->ep_targets) {
         /* should be ep target square in algebraic notation */
-		enum square_index const sqi = bitboard_lsb(pos->ep_targets);
+        enum square_index const sqi = bitboard_lsb(pos->ep_targets);
 
-		assert(sqi >= SQ_INDEX_BEGIN && sqi < SQ_INDEX_COUNT);
+        assert(sqi >= SQ_INDEX_BEGIN && sqi < SQ_INDEX_COUNT);
 
-		enum file_index const fi = index_to_file(sqi);
-		enum rank_index const ri = index_to_rank(sqi);
+        enum file_index const fi = index_to_file(sqi);
+        enum rank_index const ri = index_to_rank(sqi);
 
-		int const fch = tolower(file_index_char[fi]);
-		int const rch = tolower(rank_index_char[ri]);
+        int const fch = tolower(file_index_char[fi]);
+        int const rch = tolower(rank_index_char[ri]);
 
-		assert(fch >= 'a' && fch <= 'h');
-		assert(rch >= '1' && rch <= '8');
+        assert(fch >= 'a' && fch <= 'h');
+        assert(rch >= '1' && rch <= '8');
 
-		fprintf(out, " %c%c", fch, rch);
+        fprintf(out, " %c%c", fch, rch);
     } else {
         fprintf(out, " -");
     }
@@ -199,6 +199,7 @@ static void board_print_fen(struct pos const* pos, FILE* out)
 static void board_print(const struct pos* pos, struct move* move, FILE* out)
 {
     int buf[8][8] = {0};
+    int color[8][8] = {0};
 
     for (enum player player = PLAYER_BEGIN; player < PLAYER_COUNT; ++player) {
         for (enum piece piece = PIECE_BEGIN; piece < PIECE_COUNT; ++piece) {
@@ -207,7 +208,10 @@ static void board_print(const struct pos* pos, struct move* move, FILE* out)
             for (index i = 7; i < 8; i--) {
                 for (index j = 0; j < 8; ++j) {
                     if (x & (1ULL<<(i*8+j))) {
-                        buf[i][j] = piece_unicode[player][piece];
+                        buf[i][j] = piece_unicode[PLAYER_BLACK][piece];
+                        color[i][j] = (player == PLAYER_WHITE)
+                            ? 1
+                            : 2;
                     }
                 }
             }
@@ -221,19 +225,36 @@ static void board_print(const struct pos* pos, struct move* move, FILE* out)
         fprintf(out, "%"INDEX_FMT" ", i+1);
         for (index j = 0; j < 8; ++j) {
             index const n = INDEX_FROM_RF(i,j);
-            if (move && n == move->from) {
-                fprintf(out, "\033[%d;%dm", 30, 104); /* 44: blue*/
-            } else if (move && n == move->to) {
-                fprintf(out, "\033[%d;%dm", 30, 44); /* 104: bright blue*/
-            } else {
-                /* 45: magenta, 47: white */
-                fprintf(out, "\033[%d;%dm", 30, (i+j) % 2 ? 45 : 47);
+
+            int bg, fg;
+
+            /**/ if (color[i][j] == 1) {
+                fg = 97; /* bright white */
             }
+            else if (color[i][j] == 2) {
+                fg = 30; /* black */
+            }
+            else {
+                fg = 35; /* magenta (should not happen) */
+            }
+
+            if (move && n == move->from) {
+                bg = 104; /* blue */
+            } else if (move && n == move->to) {
+                bg = 44; /* bright blue */
+            } else {
+                /* 45: magenta,
+                 * 47: white */
+                bg = (i+j) % 2 ? 45 : 47;
+            }
+
+            fprintf(out, "\033[%d;%dm", fg, bg);
+
             if (buf[i][j]) {
                 fprintf(out, "%lc ", buf[i][j]);
             } else {
                 fprintf(out, "  "); /* idk why this hack is needed but "%lc "
-                                       is not working when buf[i][j] = ' ' */
+                                       is not sufficient when buf[i][j] = ' ' */
             }
         }
         fprintf(out, "\033[0m"); /* reset background color */

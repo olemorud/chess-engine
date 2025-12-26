@@ -1,6 +1,7 @@
 
 #define _XOPEN_SOURCE 500
 #include <unistd.h> /* usleep */
+#include <pthread.h>
 
 #include "engine.h"
 #include "board_print.h"
@@ -372,24 +373,36 @@ static void test_bishops(void)
          *  Bishop at F4 is irrelevant; it does not sit on a diagonal from D4.
          */
         bitboard expected = 0ULL;
-		expected = SQ_MASK_G7 | SQ_MASK_F6 | SQ_MASK_E5 | SQ_MASK_D4 |
-			SQ_MASK_C3 | SQ_MASK_B2 | SQ_MASK_A1;
+        expected = SQ_MASK_G7 | SQ_MASK_F6 | SQ_MASK_E5 | SQ_MASK_D4 |
+            SQ_MASK_C3 | SQ_MASK_B2 | SQ_MASK_A1;
 
         print_bishop_test("Bishop Test 6: H8, no occupancy", sq, all_occ, own_occ);
 
         const bitboard attacks = bishop_attacks_from_index(sq, all_occ) & ~own_occ;
-		if (attacks != expected) {
-			bitboard_print(attacks, stderr);
-		}
+        if (attacks != expected) {
+            bitboard_print(attacks, stderr);
+        }
         assert(attacks == expected);
     }
 
     printf("\nAll bishop_attacks_from_index tests passed.\n");
 }
 
+struct timeout_params {
+    atomic_bool* x;
+    bool v;
+    useconds_t us;
+};
+void* set_after_timeout(void* x)
+{
+    struct timeout_params* p = x;
+    usleep(p->us);
+    *p->x = p->v;
+    return NULL;
+}
+
 int main()
 {
-
     printf("sizeof pos:     %zu\n", sizeof (struct pos));
     printf("sizeof tt:      %zu\n", sizeof (struct tt));
 
@@ -403,16 +416,18 @@ int main()
     }
     fprintf(stdout, "\033[0m\n"); /* reset background color */
 
-	/* board is too big for the stack */
-	struct board* b = malloc(sizeof *b);
-	if (!b) {
-		abort();
-	}
-	*b = BOARD_INIT;
+    /* board could be too big for the stack */
+    struct board* b = malloc(sizeof *b);
+    if (!b) {
+        abort();
+    }
+    *b = BOARD_INIT;
+    board_init(b);
 
-    //board_load_fen_unsafe(&board, "1n1q1rk1/r1p2P2/1p1pp2p/pB2P3/2P5/PPN5/6b1/3QK1NR b - - 0 1");
-    //board_load_fen_unsafe(&board, "5R2/7k/P7/6pp/3B4/1PPK2bP/4r3/8 b - - 3 57");
-    board_print_fen(&b->pos, stdout);
+    //board_load_fen_unsafe(b, "1n1q1rk1/r1p2P2/1p1pp2p/pB2P3/2P5/PPN5/6b1/3QK1NR b - - 0 1");
+    //board_load_fen_unsafe(b, "8/8/2kr4/6R1/4K3/6P1/8/8 b - - 0 1");
+    //board_load_fen_unsafe(b, "5R2/7k/P7/6pp/3B4/1PPK2bP/4r3/8 b - - 3 57");
+    //board_print_fen(b->pos, stdout);
     board_print(&b->pos, NULL, stdout);
 
     struct move moves[MOVE_MAX];
@@ -429,11 +444,20 @@ int main()
             break;
         }
 
-        //struct move move = moves[0];
-        struct search_result sr = search(b, b->pos.player, 7);
+        pthread_t timer;
+        atomic_bool searching;
+        atomic_init(&searching, true);
+        struct timeout_params timer_params = {
+            .x = &searching,
+            .v = false,
+            .us = 3*1000*1000,
+        };
+        pthread_create(&timer, NULL, set_after_timeout, &timer_params);
 
-		struct move move = sr.move;
-		double const score = sr.score;
+        struct search_result sr = search(b, b->pos.player, 5, &searching);
+
+        struct move move = sr.move;
+        double const score = sr.score;
 
         printf("move %d: {\n"
                "    .from = %s, (%s)\n"
@@ -444,7 +468,7 @@ int main()
                square_index_display[move.from],
                piece_str[b->mailbox[move.from]],
                square_index_display[move.to],
-			   score
+               score
                );
         if (move.attr & MATTR_CAPTURE) printf("MATTR_CAPTURE ");
         if (move.attr & MATTR_PROMOTE) printf("MATTR_PROMOTE ");
