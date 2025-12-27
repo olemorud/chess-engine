@@ -1646,10 +1646,12 @@ static enum move_result board_move(struct pos* restrict     pos,
     else { 
         POS_MOVE(us, from_piece, move.from, move.to);
         /* capture */
-        /**/ if (to_mask & pos->occupied[them]) {
+        if (to_mask & pos->occupied[them]) {
             POS_REMOVE(them, to_piece, move.to);
         }
-        else if (from_piece == PIECE_PAWN) {
+
+        /* promote / ep */
+        if (from_piece == PIECE_PAWN) {
             bitboard const finishline = (us == PLAYER_WHITE ? RANK_MASK_8 : RANK_MASK_1);
 
             /* en passent */
@@ -1669,6 +1671,7 @@ static enum move_result board_move(struct pos* restrict     pos,
                 pos->ep_targets |= RANK_SHIFT_DOWN_1(from_mask);
                 pos->hash = tt_hash_update_ep_targets(pos->hash, INDEX_SHIFT_DOWN(move.from, 1));
             }
+            /* promote */
             else if (to_mask & finishline) {
                 /* already moved to `move.to` */
                 POS_REMOVE(us, PIECE_PAWN, move.to);
