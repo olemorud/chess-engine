@@ -5,3 +5,4 @@ mbb_rook.h
 tests
 *.dSYM
 between_lookup.h
+diagonals.h
