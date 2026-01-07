@@ -1,7 +1,7 @@
 let exports;
 
 async function init() {
-    const resp = await fetch("./chess.wasm");
+    const resp = await fetch("./chess.wasm?rand=" + crypto.randomUUID());
     if (!resp.ok) throw new Error(`fetch wasm failed ${resp.status} ${resp.statusText}`);
 
     const { instance } = await WebAssembly.instantiateStreaming(resp, {});

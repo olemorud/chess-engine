@@ -24,8 +24,8 @@ wasm: chess.wasm
 codegen: codegen.c
 	$(CC) -o $@ $(CFLAGS) $^
 
-chess.wasm: wasm-compat-chatgpt.c mbb_rook.h mbb_bishop.h engine.h
-	$(CC) -DWASM -o $@ wasm-compat-chatgpt.c $(CFLAGS.$(CC)) $(CFLAGS.$(CC).wasm)
+chess.wasm: wasm-compat.c mbb_rook.h mbb_bishop.h engine.h
+	$(CC) -DWASM -o $@ wasm-compat.c $(CFLAGS.$(CC)) $(CFLAGS.$(CC).wasm)
 
 mbb_rook.h: codegen
 	./codegen
