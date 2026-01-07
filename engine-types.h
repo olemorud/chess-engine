@@ -195,6 +195,7 @@ static char const* side_str[SIDE_COUNT] = {
 /* https://en.wikipedia.org/wiki/X_macro */
 /*    enum           value   white char   white unicode   black char    black unicode  */
 #define PIECES \
+    X(PIECE_EMPTY,    0.0f,         ' ',            ' ',         ' ',             ' ') \
     X(PIECE_PAWN,     1.0f,         'P',         0x2659,         'p',          0x265F) \
     X(PIECE_KNIGHT,   3.1f,         'N',         0x2658,         'n',          0x265E) \
     X(PIECE_BISHOP,   3.2f,         'B',         0x2657,         'b',          0x265D) \
@@ -207,8 +208,8 @@ typedef enum piece : uint8_t {
 #define X(e, v, wc, wu, bc, bu) e,
     PIECES
     PIECE_COUNT,
-    PIECE_BEGIN = 0,
-    PIECE_POISONED, /* used as default undefined value in debug builds */
+    PIECE_BEGIN = PIECE_PAWN,
+    PIECE_POISONED, /* used as undefined value in debug builds */
 #undef X
 } Piece8;
 
@@ -273,6 +274,25 @@ struct move {
     #define APPEAL_MAX UINT8_MAX
     uint8_t  appeal;
 };
+
+/*
+ * Move32 layout:
+ * f (from piece):  3 bits
+ * F (from square): 6 bits
+ * t (to piece):    3 bits
+ * T (to square):   6 bits
+ * p (promotion):   ? bits (likely 3)
+ * [x,x,x,x,x,x,x,x,x,x,x,p,p,p,T,T,T,T,T,T,t,t,t,F,F,F,F,F,F,f,f,f]
+ * */
+
+typedef uint32_t Move32;
+
+#define MOVE_FROM_PIECE(m)  (m & 0b000000000000000000111)
+#define MOVE_FROM_SQUARE(m) (m & 0b000000000000111111000)
+#define MOVE_TO_PIECE(m)    (m & 0b000000000111000000000)
+#define MOVE_TO_SQUARE(m)   (m & 0b000111111000000000000)
+#define MOVE_PROMOTION(m)   (m & 0b111000000000000000000)
+
 _Static_assert(sizeof(struct move) == 4,
         "this static assuming is here to check when sizeof(move) changes");
 

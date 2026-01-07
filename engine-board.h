@@ -12,7 +12,6 @@ struct board {
         Side8 moving_side;
         bool  castling_illegal[SIDE_COUNT][CASTLE_COUNT];
         Bb64  ep_targets;
-        Bb64  occupied[SIDE_COUNT];
 
         int halfmoves; /* FIXME: this duplicates the hist.length value */
         int fullmoves;
@@ -44,6 +43,7 @@ struct board {
         .fullmoves = 1,                                   \
         .pieces = {                                       \
             [SIDE_WHITE] = {                              \
+                [PIECE_EMPTY] = RANK_MASK_3 | RANK_MASK_4 | RANK_MASK_5 | RANK_MASK_6 | RANK_MASK_7 | RANK_MASK_8, \
                 [PIECE_PAWN]   = RANK_MASK_2,             \
                 [PIECE_ROOK]   = SQMASK_A1 | SQMASK_H1,   \
                 [PIECE_KNIGHT] = SQMASK_B1 | SQMASK_G1,   \
@@ -52,6 +52,7 @@ struct board {
                 [PIECE_KING]   = SQMASK_E1,               \
             },                                            \
             [SIDE_BLACK] = {                              \
+                [PIECE_EMPTY] = RANK_MASK_1 | RANK_MASK_2 | RANK_MASK_3 | RANK_MASK_4 | RANK_MASK_5 | RANK_MASK_6, \
                 [PIECE_PAWN]   = RANK_MASK_7,             \
                 [PIECE_ROOK]   = SQMASK_A8 | SQMASK_H8,   \
                 [PIECE_KNIGHT] = SQMASK_B8 | SQMASK_G8,   \
@@ -59,16 +60,6 @@ struct board {
                 [PIECE_QUEEN]  = SQMASK_D8,               \
                 [PIECE_KING]   = SQMASK_E8,               \
             }                                             \
-        },                                                \
-        .occupied = {                                     \
-            [SIDE_WHITE] =                                \
-                RANK_MASK_2 | SQMASK_A1 | SQMASK_H1 |     \
-                SQMASK_B1 | SQMASK_G1 | SQMASK_C1 |       \
-                SQMASK_F1 | SQMASK_D1 | SQMASK_E1,        \
-            [SIDE_BLACK] =                                \
-                RANK_MASK_7 | SQMASK_A8 | SQMASK_H8 |     \
-                SQMASK_B8 | SQMASK_G8| SQMASK_C8 |        \
-                SQMASK_F8| SQMASK_D8| SQMASK_E8,          \
         },                                                \
         .hash = ~0ULL,                                    \
     },                                                    \
@@ -156,11 +147,18 @@ static bool board_load_fen_unsafe(struct board* b, char const* fen_str)
                 struct piece_side const p = piece_and_side_from_char[(uint8_t)ch];
                 Bb64 const sq_mask = MASK_FROM_RF(ri, fi);
                 b->pos.pieces[p.side][p.piece] |= sq_mask;
-                b->pos.occupied[p.side] |= sq_mask;
+                b->pos.pieces[p.side][PIECE_EMPTY] &= ~sq_mask;
                 b->mailbox[SQ_FROM_RF(ri, fi)] = p.piece;
             }
         }
         (void)BUF_GETCHAR(fen); /* discard '/' or ' ' */
+    }
+
+    b->pos.pieces[SIDE_WHITE][PIECE_EMPTY] = ~0ULL;
+    b->pos.pieces[SIDE_BLACK][PIECE_EMPTY] = ~0ULL;
+    for (Piece8 p = PIECE_BEGIN; p < PIECE_COUNT; ++p) {
+        b->pos.pieces[SIDE_WHITE][PIECE_EMPTY] &= ~b->pos.pieces[SIDE_WHITE][p];
+        b->pos.pieces[SIDE_BLACK][PIECE_EMPTY] &= ~b->pos.pieces[SIDE_BLACK][p];
     }
 
     { /* active color */
@@ -238,13 +236,6 @@ enum move_result {
     MR_CHECKMATE,
 };
 
-struct move_undo {
-    Piece8 captured_piece;
-    Piece8 moved_piece;
-    Sq8 captured_square;
-    Sq8 moved_square;
-};
-
 /* does not check validity */
 static enum move_result move_piece(struct pos* restrict     pos,
                                    Side8                    us,
@@ -252,8 +243,6 @@ static enum move_result move_piece(struct pos* restrict     pos,
                                    Piece8                   mailbox[restrict static SQ_COUNT],
                                    struct move              move)
 {
-    struct move_undo undo;
-
     //Side8 const us   = pos->moving_side;
     Side8 const them = other_side(us);
 
@@ -277,7 +266,7 @@ static enum move_result move_piece(struct pos* restrict     pos,
         do { \
             Bb64 const x = MASK_FROM_SQ(from) | MASK_FROM_SQ(to); \
             pos->pieces[side][piece] ^= x; \
-            pos->occupied[side] ^= x; \
+            pos->pieces[side][PIECE_EMPTY] ^= x; \
             pos->hash = tt_hash_update(pos->hash, from, side, piece); \
             pos->hash = tt_hash_update(pos->hash, to, side, piece); \
             mailbox[to] = piece; \
@@ -288,7 +277,7 @@ static enum move_result move_piece(struct pos* restrict     pos,
         do { \
             Bb64 const x = MASK_FROM_SQ(at); \
             pos->pieces[owner][piece] &= ~x; \
-            pos->occupied[owner] &= ~x; \
+            pos->pieces[owner][PIECE_EMPTY] |= x; \
             pos->hash = tt_hash_update(pos->hash, at, owner, piece); \
             hist->length = 0; \
             pos->halfmoves = 0; \
@@ -298,7 +287,7 @@ static enum move_result move_piece(struct pos* restrict     pos,
         do { \
             Bb64 const x = MASK_FROM_SQ(at); \
             pos->pieces[owner][piece] |= x; \
-            pos->occupied[owner] |= x; \
+            pos->pieces[owner][PIECE_EMPTY] &= ~x; \
             pos->hash = tt_hash_update(pos->hash, at, owner, piece); \
             mailbox[at] = piece; \
             pos->halfmoves = 0; \
@@ -325,7 +314,7 @@ static enum move_result move_piece(struct pos* restrict     pos,
     else {
         POS_MOVE(us, from_piece, move.from, move.to);
         /* capture */
-        if (to_mask & pos->occupied[them]) {
+        if (to_mask & ~pos->pieces[them][PIECE_EMPTY]) {
             POS_REMOVE(them, to_piece, move.to);
         }
 

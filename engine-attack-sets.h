@@ -91,7 +91,7 @@ static Bb64 diagonals(Bb64 p)
  * ==================
  *
  * All piece attack functions rely on the caller masking their own pieces.
- * e.g. `knight_attacks(knights) & ~our_occupied`
+ * e.g. `knight_attacks(knights) & empty`
  * */
 
 static Bb64 knight_attacks(Bb64 p)
@@ -522,7 +522,7 @@ static Bb64 attacks_to(struct pos const* pos,
                        Bb64              pretend_occupied,
                        Bb64              pretend_empty)
 {
-    Bb64 const occ_orig = pos->occupied[SIDE_WHITE] | pos->occupied[SIDE_BLACK];
+    Bb64 const occ_orig = ~(pos->pieces[SIDE_WHITE][PIECE_EMPTY] & pos->pieces[SIDE_BLACK][PIECE_EMPTY]);
     Bb64 const occ = (occ_orig & ~pretend_empty) | pretend_occupied;
 
     Bb64 const* pw = pos->pieces[SIDE_WHITE];
@@ -563,15 +563,15 @@ static
 Bb64 checkers(struct pos const* pos, Side8 us)
 {
     /* TODO: specialize */
-    return attacks_to(pos, pos->pieces[us][PIECE_KING], 0ULL, 0ULL) & ~pos->occupied[us];
+    return attacks_to(pos, pos->pieces[us][PIECE_KING], 0ULL, 0ULL) & pos->pieces[us][PIECE_EMPTY];
 }
 
 static
 Bb64 pinning_lines_to_target(struct pos const* pos, Side8 us, Sq8 tsq)
 {
     Side8 const them = other_side(us);
-    Bb64 const our_occ = pos->occupied[us];
-    Bb64 const their_occ = pos->occupied[them];
+    Bb64 const our_occ = ~pos->pieces[us][PIECE_EMPTY];
+    Bb64 const their_occ = ~pos->pieces[them][PIECE_EMPTY];
 
     Bb64 const* p = pos->pieces[them];
     Bb64 const bqs = p[PIECE_QUEEN] | p[PIECE_BISHOP];
@@ -595,7 +595,7 @@ Bb64 pinning_lines_to_target(struct pos const* pos, Side8 us, Sq8 tsq)
 static
 Bb64 all_threats_from_side(struct pos const * pos, Side8 who)
 {
-    Bb64 const occ = pos->occupied[SIDE_WHITE] | pos->occupied[SIDE_BLACK];
+    Bb64 const occ = ~(pos->pieces[SIDE_WHITE][PIECE_EMPTY] & pos->pieces[SIDE_BLACK][PIECE_EMPTY]);
 
     Bb64 const* p = pos->pieces[who];
     Bb64 t = 0ULL;

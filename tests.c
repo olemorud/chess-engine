@@ -440,9 +440,6 @@ int main()
     //board_print_fen(b->pos, stdout);
     board_print(&b->pos, NULL, stdout, print_threats);
 
-    struct move moves[MOVE_MAX];
-    size_t move_count;
-
     for (int turn = 0; turn < 200; ++turn) {
         /*
         move_count = 0;

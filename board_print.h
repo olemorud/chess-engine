@@ -197,10 +197,6 @@ static void board_print(struct pos const* pos, struct move* move, FILE* out, boo
                 bg = (i+j) % 2 ? 45 : 43;
             }
 
-            if ((pos->occupied[SIDE_WHITE] | pos->occupied[SIDE_BLACK]) & MASK_FROM_SQ(n)) {
-                bg += 60; /* make bright */
-            }
-
             fprintf(out, "\033[%d;%dm", fg, bg);
 
             if (buf[i][j]) {

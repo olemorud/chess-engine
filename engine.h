@@ -36,14 +36,17 @@ static void move_compute_appeal(struct move* restrict      m,
     Side8 them = other_side(us);
     Piece8 const atk = mailbox[m->from];
 
-    uint8_t n = 1;
-    if (MASK_FROM_SQ(m->to) & pos->occupied[them]) {
+    uint8_t n = 0;
+    if ((MASK_FROM_SQ(m->to) & pos->pieces[them][PIECE_EMPTY]) == 0) {
         n += (uint8_t)piece_value[mailbox[m->to]];
     }
 
-    uint8_t mmv_lva_bonus = (uint8_t)(16.0f*(float)n - piece_value[atk]);
-
-    m->appeal = mmv_lva_bonus;
+    /* TODO: remove branch */
+    if (n) {
+        m->appeal = (uint8_t)(16.0f*(float)n - piece_value[atk]);
+    } else {
+        m->appeal = 0;
+    }
 }
 
 static float board_score_heuristic(struct pos const* pos)
@@ -52,9 +55,8 @@ static float board_score_heuristic(struct pos const* pos)
        eventually flipping the sign based on `pos` */
     float score = 0.0f;
 
-    Bb64 const occw = pos->occupied[SIDE_WHITE];
-    Bb64 const occb = pos->occupied[SIDE_BLACK];
-    Bb64 const occall = occw | occb;
+    Bb64 const occw = ~pos->pieces[SIDE_WHITE][PIECE_EMPTY];
+    Bb64 const occb = ~pos->pieces[SIDE_BLACK][PIECE_EMPTY];
 
     enum game_progress const gp = endgameness(pos);
 
@@ -172,8 +174,9 @@ float quiesce(struct pos const*  pos,
 
     all_pseudolegal_moves(pos, MG_CAPTURES, us, &move_count, moves);
     if (move_count == 0) {
-        return -(SCORE_CHECKMATE + (float)depth);
+        return score;
     }
+
     for (size_t i = 0; i < move_count; ++i) {
         move_compute_appeal(&moves[i], pos, us, mailbox);
     }
@@ -181,7 +184,7 @@ float quiesce(struct pos const*  pos,
     while (move_count) {
         struct move m = moves_linear_search(moves, &move_count);
 
-        assuming((pos->occupied[them] | pos->ep_targets) & MASK_FROM_SQ(m.to));
+        assuming((~pos->pieces[them][PIECE_EMPTY] | pos->ep_targets) & MASK_FROM_SQ(m.to));
 
         struct pos poscpy = *pos;
 

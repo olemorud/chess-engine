@@ -22,23 +22,7 @@ struct move move_make(struct pos const* restrict pos,
     (void)piece;
     (void)pos;
     (void)add_attr;
-#if 0
-    Side8 const us = pos->moving_side;
-    Side8 const them = other_side(us);
-    Bb64 const their_occ = pos->occupied[them];
-    Bb64 const tomask = MASK_FROM_SQ(to);
-    Bb64 const finishline = (us == SIDE_WHITE ? RANK_MASK_8 : RANK_MASK_1);
 
-    uint8_t attr = 0ULL;
-#define MASK_IF8(x) ((~(uint8_t)0U) + (uint8_t)!(x))
-    attr |= MATTR_CAPTURE & MASK_IF8(tomask & their_occ);
-    attr |= MATTR_CAPTURE & MASK_IF8((piece == PIECE_PAWN) && tomask & pos->ep_targets);
-    attr |= MATTR_PROMOTE & MASK_IF8((piece == PIECE_PAWN) && (tomask & finishline));
-    attr |= add_attr;
-#undef MASK_IF8
-
-    return (struct move){.from = from, .to = to, .attr = attr};
-#endif
     return (struct move){.from = from, .to = to, .attr = add_attr};
 }
 #define MOVE_MAX 128
@@ -63,8 +47,8 @@ static void all_pseudolegal_from_piece(struct pos const* restrict pos,
 
     Side8 them = other_side(us);
 
-    Bb64 const our_occ   = pos->occupied[us];
-    Bb64 const all_occ   = pos->occupied[SIDE_WHITE] | pos->occupied[SIDE_BLACK];
+    Bb64 const our_occ = ~pos->pieces[us][PIECE_EMPTY];
+    Bb64 const all_occ = ~(pos->pieces[SIDE_WHITE][PIECE_EMPTY] & pos->pieces[SIDE_BLACK][PIECE_EMPTY]);
 
     if (type == MG_CHECKS) {
         allowed &= non_pawn_piece_attacks(piece, pos->pieces[them][PIECE_KING], all_occ);
@@ -93,7 +77,7 @@ static void all_pseudolegal_pawn_moves_##side(struct pos const* restrict pos,\
                                               size_t* restrict           out_count,\
                                               struct move                out[restrict static MOVE_MAX])\
 {\
-    Bb64 const all_occ = pos->occupied[SIDE_WHITE] | pos->occupied[SIDE_BLACK];\
+    Bb64 const all_occ = ~(pos->pieces[SIDE_WHITE][PIECE_EMPTY] & pos->pieces[SIDE_BLACK][PIECE_EMPTY]);\
 \
     if (type == MG_CHECKS) {\
         allowed &= pawn_attacks_##opp_side(pos->pieces[other_side(side_enum)][PIECE_KING]);\
@@ -127,7 +111,7 @@ static void all_pseudolegal_pawn_attacks_##side(struct pos const* restrict pos,\
                                                 size_t* restrict           out_count,\
                                                 struct move                out[restrict static MOVE_MAX])\
 {\
-    Bb64 const their_occ = pos->occupied[other_side(side_enum)];\
+    Bb64 const their_occ = ~pos->pieces[other_side(side_enum)][PIECE_EMPTY];\
 \
     if (type == MG_CHECKS) {\
         allowed &= pawn_attacks_##opp_side(pos->pieces[other_side(side_enum)][PIECE_KING]);\
@@ -177,7 +161,7 @@ static void all_pseudolegal_moves(struct pos const* restrict pos,
 
     Bb64 const their_threats = all_threats_from_side(pos, them);
 
-    Bb64 const their_occ = pos->occupied[them];
+    Bb64 const their_occ = ~pos->pieces[them][PIECE_EMPTY];
 
     Bb64 allowed;
     if (type == MG_CAPTURES) {
@@ -243,7 +227,7 @@ static void all_pseudolegal_moves(struct pos const* restrict pos,
     /* castling */
     if (!chk && type != MG_CAPTURES) {
         bool can_castle_kingside, can_castle_queenside;
-        Bb64 const blocked = pos->occupied[SIDE_WHITE] | pos->occupied[SIDE_BLACK] | their_threats;
+        Bb64 const blocked = ~(pos->pieces[SIDE_WHITE][PIECE_EMPTY] & pos->pieces[SIDE_BLACK][PIECE_EMPTY]) | their_threats;
         if (us == SIDE_WHITE) {
             can_castle_kingside = !(blocked & (SQMASK_F1 | SQMASK_G1))
                           && (pos->pieces[us][PIECE_ROOK] & SQMASK_H1)

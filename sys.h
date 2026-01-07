@@ -20,8 +20,8 @@ static size_t g_buf_len = 0;
 
 static void* sys_mmap_anon_shared(size_t size, int, int)
 {
-	/* FIXME: this program relies on very few memory allocations, a simple bump
-	 * allocator works for now, but will cause memory leaks in the future */
+    /* FIXME: this program relies on very few memory allocations, a simple bump
+     * allocator works for now, but will cause memory leaks in the future */
     size = (size + 7ULL) & ~7ULL;
 
     if (g_buf_len + size > sizeof g_buf) {
