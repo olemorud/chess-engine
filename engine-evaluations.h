@@ -314,25 +314,25 @@ BITBOARD( \
 
 #define EARLY_POSITIONAL_BONUS_0 \
    /* piece         bonus   area*/ \
-    X(PIECE_PAWN,    0.02,  BOARD_CENTER_4X4) \
-    X(PIECE_KNIGHT,  0.05,  BOARD_CENTER_4X4) \
-    X(PIECE_BISHOP,  0.05,  BOARD_CENTER_6X6 & (DIAGONAL_A1_H8 | DIAGONAL_A8_H1)) \
-    X(PIECE_KING,    0.15,  REL_KING_CASTLE_KINGSIDE) \
-    X(PIECE_QUEEN,  -0.15,  RANK_MASK_3 | RANK_MASK_4 | RANK_MASK_5 | RANK_MASK_6) \
-    X(PIECE_ROOK,    0.10,  FILE_MASK_D | FILE_MASK_E) \
+    X(PIECE_PAWN,    0.02f,  BOARD_CENTER_4X4) \
+    X(PIECE_KNIGHT,  0.05f,  BOARD_CENTER_4X4) \
+    X(PIECE_BISHOP,  0.05f,  BOARD_CENTER_6X6 & (DIAGONAL_A1_H8 | DIAGONAL_A8_H1)) \
+    X(PIECE_KING,    0.15f,  REL_KING_CASTLE_KINGSIDE) \
+    X(PIECE_QUEEN,  -0.15f,  RANK_MASK_3 | RANK_MASK_4 | RANK_MASK_5 | RANK_MASK_6) \
+    X(PIECE_ROOK,    0.10f,  FILE_MASK_D | FILE_MASK_E) \
     /**/
 
 #define EARLY_POSITIONAL_BONUS_1 \
    /* piece         bonus   area*/ \
-    X(PIECE_PAWN,   0.02,   BOARD_CENTER_2X2) \
-    X(PIECE_BISHOP, 0.05,   REL_BISHOP_KING_ATTACK) \
+    X(PIECE_PAWN,   0.02f,   BOARD_CENTER_2X2) \
+    X(PIECE_BISHOP, 0.05f,   REL_BISHOP_KING_ATTACK) \
     /**/
 
 #define EARLY_POSITIONAL_BONUS_2 \
    /* piece          bonus   area*/ \
-    X(PIECE_PAWN,   -0.18,  ~REL_EARLY_PAWN_STRUCTURE) \
-    X(PIECE_KNIGHT, -0.10,   REL_UNDEVELOPED_KNIGHTS) \
-    X(PIECE_BISHOP, -0.10,   REL_UNDEVELOPED_BISHOPS) \
+    X(PIECE_PAWN,   -0.18f,  ~REL_EARLY_PAWN_STRUCTURE) \
+    X(PIECE_KNIGHT, -0.10f,   REL_UNDEVELOPED_KNIGHTS) \
+    X(PIECE_BISHOP, -0.10f,   REL_UNDEVELOPED_BISHOPS) \
     /**/
 
 #define EARLY_POSITIONAL_BONUS_3 \
@@ -345,58 +345,58 @@ BITBOARD( \
 
 #define MIDDLE_POSITIONAL_BONUS_0 \
    /* piece         bonus   area*/ \
-    X(PIECE_PAWN,    0.02,  BOARD_CENTER_4X4) \
-    X(PIECE_KNIGHT,  0.05,  BOARD_CENTER_4X4) \
-    X(PIECE_BISHOP,  0.05,  BOARD_CENTER_6X6 & (DIAGONAL_A1_H8 | DIAGONAL_A8_H1)) \
-    X(PIECE_KING,    0.15,  REL_KING_CASTLE_KINGSIDE) \
+    X(PIECE_PAWN,    0.02f,  BOARD_CENTER_4X4) \
+    X(PIECE_KNIGHT,  0.05f,  BOARD_CENTER_4X4) \
+    X(PIECE_BISHOP,  0.05f,  BOARD_CENTER_6X6 & (DIAGONAL_A1_H8 | DIAGONAL_A8_H1)) \
+    X(PIECE_KING,    0.15f,  REL_KING_CASTLE_KINGSIDE) \
     /**/
 
 #define MIDDLE_POSITIONAL_BONUS_1 \
    /* piece         bonus   area*/ \
-    X(PIECE_PAWN,   0.02,   BOARD_CENTER_2X2) \
-    X(PIECE_BISHOP, 0.07,   REL_BISHOP_KING_ATTACK) \
-    X(PIECE_QUEEN,  0.07,   REL_BISHOP_KING_ATTACK) \
+    X(PIECE_PAWN,   0.02f,   BOARD_CENTER_2X2) \
+    X(PIECE_BISHOP, 0.07f,   REL_BISHOP_KING_ATTACK) \
+    X(PIECE_QUEEN,  0.07f,   REL_BISHOP_KING_ATTACK) \
     /**/
 
 #define MIDDLE_POSITIONAL_BONUS_2 \
    /* piece         bonus   area*/ \
-    X(PIECE_PAWN,   0.02,   REL_PAWN_KINGSIDE) \
+    X(PIECE_PAWN,   0.02f,   REL_PAWN_KINGSIDE) \
     /**/
 
 #define MIDDLE_POSITIONAL_BONUS_3 \
    /* piece         bonus   area*/ \
-    X(PIECE_BISHOP, 0.05,   BOARD_CENTER_6X6) \
-    X(PIECE_KNIGHT, 0.05,   BOARD_CENTER_6X6) \
+    X(PIECE_BISHOP, 0.05f,   BOARD_CENTER_6X6) \
+    X(PIECE_KNIGHT, 0.05f,   BOARD_CENTER_6X6) \
     /**/
 
 /* ------------------------------- end game -------------------------------- */
 
 #define LATE_POSITIONAL_BONUS_0 \
    /* piece         bonus   area*/ \
-    X(PIECE_PAWN,    0.30,  REL_RANK_7 | REL_RANK_6 | REL_RANK_5) \
-    X(PIECE_KING,    0.10,  BOARD_CENTER_6X6) \
+    X(PIECE_PAWN,    0.30f,  REL_RANK_7 | REL_RANK_6 | REL_RANK_5) \
+    X(PIECE_KING,    0.10f,  BOARD_CENTER_6X6) \
     /**/
 
 #define LATE_POSITIONAL_BONUS_1 \
    /* piece         bonus    area*/ \
-    X(PIECE_PAWN,    0.30,   REL_RANK_7 | REL_RANK_6) \
-    X(PIECE_KING,    0.10,   BOARD_CENTER_4X4) \
+    X(PIECE_PAWN,    0.30f,   REL_RANK_7 | REL_RANK_6) \
+    X(PIECE_KING,    0.10f,   BOARD_CENTER_4X4) \
     /**/
 
 #define LATE_POSITIONAL_BONUS_2 \
    /* piece         bonus    area*/ \
-    X(PIECE_PAWN,    0.70,   REL_RANK_7) \
-    X(PIECE_KING,    0.10,   BOARD_CENTER_2X2) \
+    X(PIECE_PAWN,    0.70f,   REL_RANK_7) \
+    X(PIECE_KING,    0.10f,   BOARD_CENTER_2X2) \
     /**/
 
 #define LATE_POSITIONAL_BONUS_3 \
    /* piece         bonus   area*/ \
-    X(PIECE_KING,   -0.50,  ~BOARD_CENTER_6X6) \
+    X(PIECE_KING,   -0.50f,  ~BOARD_CENTER_6X6) \
     /**/
 
 struct posmod {
     Bb64 const area;
-    double const val;
+    float const val;
 };
 
 static inline struct posmod positional_modifier(Side8 pl, enum game_progress st, size_t layer, Piece8 pz)

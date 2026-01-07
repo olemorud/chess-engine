@@ -15,6 +15,16 @@ static Bb64 cardinals_from_index(Sq8 p)
     return (FILE_MASK(sq_to_file(p)) | RANK_MASK(sq_to_rank(p)));
 }
 
+static Bb64 cardinals(Bb64 p)
+{
+    Bb64 b = 0ULL;
+    while (p) {
+        Sq8 const lsb = bitboard_pop_lsb(&p);
+        b |= cardinals_from_index(lsb);
+    }
+    return b;
+}
+
 static Bb64 diagonals_from_index(Sq8 sq)
 {
 #ifdef CODEGEN
@@ -66,6 +76,15 @@ static Bb64 diagonals_from_index(Sq8 sq)
 #endif
 }
 
+static Bb64 diagonals(Bb64 p)
+{
+    Bb64 b = 0ULL;
+    while (p) {
+        Sq8 const lsb = bitboard_pop_lsb(&p);
+        b |= diagonals_from_index(lsb);
+    }
+    return b;
+}
 
 
 /* PIECE ATTACKS

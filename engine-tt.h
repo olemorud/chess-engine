@@ -1,28 +1,27 @@
 #pragma once
 
 struct search_option {
-    /* TODO: optimize order of fields and size */
-    double      score;
-    struct move move;
-    uint64_t    hash;
-    uint8_t     init : 1;
-    enum tt_flag {TT_EXACT, TT_LOWER, TT_UPPER} flag : 3;
-    int8_t      depth : 4;
+    uint64_t    hash;      // + 64 (64  / 8)
+    float       score;     // + 32 (96  / 12)
+    struct move move;      // + 32 (128 / 16)
+    int         depth : 4; // + 4  (132 / 17)
+    int         init  : 1; // + 1  (133 / 17)
+    enum tt_flag {TT_EXACT, TT_LOWER, TT_UPPER} flag : 3; // +3 (136 / 17)
 };
 
 #define TT_ADDRESS_BITS 24
 #define TT_ENTRIES (1ULL<<TT_ADDRESS_BITS)
+#define TT_MASK (TT_ENTRIES-1)
 struct tt {
     struct search_option* entries/*[TT_ENTRIES]*/; /* must be initialized somewhere */
+    size_t mask;
 
-#ifndef NDEBUG
     /* stats */
     uint64_t collisions;
     uint64_t hits;
     uint64_t probes;
     uint64_t overwritten;
     uint64_t insertions;
-#endif
 };
 
 struct zobrist {
@@ -92,10 +91,10 @@ static inline uint64_t tt_hash_switch_side(uint64_t hash)
 
 static inline struct search_option tt_get(struct tt* tt, uint64_t hash)
 {
-    uint64_t const addr = hash % TT_ENTRIES;
+    uint64_t const addr = hash & tt->mask;
     struct search_option tte = tt->entries[addr];
 
-#ifndef NDEBUG
+#ifndef NSTATS
     tt->probes += 1;
     if (tte.init && tte.hash == hash) {
         tt->hits += 1;
@@ -108,10 +107,10 @@ static inline struct search_option tt_get(struct tt* tt, uint64_t hash)
 
 static inline void tt_insert(struct tt* tt, uint64_t hash, struct search_option so)
 {
-    uint64_t const addr = hash % TT_ENTRIES;
+    uint64_t const addr = hash & tt->mask;
     so.init = true;
     tt->entries[addr] = so;
-#ifndef NDEBUG
+#ifndef NSTATS
     tt->insertions += 1;
 #endif
 }
@@ -123,7 +122,7 @@ static inline void tt_insert(struct tt* tt, uint64_t hash, struct search_option 
  */
 static inline void tt_insert_maybe(struct tt* tt, uint64_t hash, struct search_option so)
 {
-    uint64_t const addr = hash % TT_ENTRIES;
+    uint64_t const addr = hash & tt->mask;
 
 #if 0
     struct search_option* tte = &tt->entries[addr];
@@ -134,7 +133,7 @@ static inline void tt_insert_maybe(struct tt* tt, uint64_t hash, struct search_o
 
     so.init = true;
     tt->entries[addr] = so;
-#ifndef NDEBUG
+#ifndef NSTATS
     tt->insertions += 1;
 #endif
 }

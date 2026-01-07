@@ -1,5 +1,8 @@
 
-#define USE_PRINTF
+#define FEATURE_STOPPABLE_SEARCH
+#define FEATURE_USE_PRINTF
+#undef NSTATS 
+
 #define _XOPEN_SOURCE 500
 #include <unistd.h> /* usleep */
 #include <pthread.h>
@@ -390,15 +393,15 @@ static void test_bishops(void)
 }
 
 struct timeout_params {
-    atomic_bool* x;
-    bool v;
+    struct searching_flag* x;
+    uint32_t v;
     useconds_t us;
 };
 void* set_after_timeout(void* x)
 {
     struct timeout_params* p = x;
     usleep(p->us);
-    *p->x = p->v;
+    searching_stop(p->x);
     return NULL;
 }
 
@@ -406,9 +409,11 @@ int main()
 {
     bool const print_threats = true;
 
-    printf("sizeof pos:     %zu\n", sizeof (struct pos));
-    printf("sizeof tt:      %zu\n", sizeof (struct tt));
-    printf("sizeof board:   %zu\n", sizeof (struct board));
+    printf("sizeof pos:            %zu\n", sizeof (struct pos));
+    printf("sizeof tt:             %zu\n", sizeof (struct tt));
+    printf("sizeof board:          %zu\n", sizeof (struct board));
+    printf("sizeof search_option:  %zu\n", sizeof (struct search_option));
+    printf("sizeof all tt entries: %zu\n", (1<<26) * sizeof (struct search_option));
 
 #if 0
     test_rooks();
@@ -431,6 +436,7 @@ int main()
     //board_load_fen_unsafe(b, "1n1q1rk1/r1p2P2/1p1pp2p/pB2P3/2P5/PPN5/6b1/3QK1NR b - - 0 1");
     //board_load_fen_unsafe(b, "8/8/2kr4/6R1/4K3/6P1/8/8 b - - 0 1");
     //board_load_fen_unsafe(b, "8/8/5R2/8/2K3PP/1B2k3/8/8 b - - 1 4");
+    //board_load_fen_unsafe(b, "4r1k1/b1P1B3/P5pK/1p4P1/7q/8/4p3/1R6 w - - 1 54");
     //board_print_fen(b->pos, stdout);
     board_print(&b->pos, NULL, stdout, print_threats);
 
@@ -438,6 +444,7 @@ int main()
     size_t move_count;
 
     for (int turn = 0; turn < 200; ++turn) {
+        /*
         move_count = 0;
         all_pseudolegal_moves(&b->pos, MG_ALL, b->pos.moving_side, &move_count, moves);
 
@@ -448,10 +455,12 @@ int main()
             board_print(&b->pos, NULL, stdout, print_threats);
             break;
         }
+        */
 
         pthread_t timer;
-        atomic_bool searching;
-        atomic_init(&searching, true);
+        struct searching_flag searching;
+        searching_start(&searching);
+        //atomic_init(&searching, 1);
 #if 1
         struct timeout_params timer_params = {
             .x = &searching,
@@ -482,11 +491,18 @@ int main()
 
         enum move_result const r = board_move(b, move);
 
+        /* illegal board state from an engine move (i.e. hanging king) means checkmate */
+        if (!board_is_legal(b)) {
+            printf("checkmate!\n");
+            break;
+        }
+
 #if 1
         board_print_fen(&b->pos, stdout);
         tt_print_stats(&b->tt, stdout);
         board_print(&b->pos, &move, stdout, print_threats);
         fprintf(stderr, "board hist len: %zu\n", b->hist.length);
+        fprintf(stderr, "\n------------------------\n\n\n");
 #endif
 
         if (r == MR_STALEMATE) {
@@ -496,14 +512,13 @@ int main()
 
         if (b->pos.pieces[SIDE_WHITE][PIECE_KING] == 0ULL) {
             printf("white king gone!!\n");
-            exit(1);
-        }
-        if (b->pos.pieces[SIDE_BLACK][PIECE_KING] == 0ULL) {
-            printf("black king gone!!\n");
-            exit(1);
+            exit(EXIT_FAILURE);
         }
 
-        //usleep(1000000);
+        if (b->pos.pieces[SIDE_BLACK][PIECE_KING] == 0ULL) {
+            printf("black king gone!!\n");
+            exit(EXIT_FAILURE);
+        }
     }
 
     return EXIT_SUCCESS;

@@ -23,7 +23,7 @@ struct board {
 
     /* used for repeated board state detection only */
     struct history {
-        struct pos items[64];
+        uint64_t hashes[50]; /* array of zobrist hashes */
         size_t length;
     } hist;
 
@@ -35,6 +35,9 @@ struct board {
      * */
     Piece8 mailbox[SQ_COUNT];
 };
+
+/* attack-sets depends on the definition of struct pos, whoops ¯\_(ツ)_/¯ */
+#include "engine-attack-sets.h"
 
 #define BOARD_INIT (struct board) {                       \
     .pos = {                                              \
@@ -112,9 +115,12 @@ void board_init(struct board* b)
         *b = BOARD_INIT;
     }
     if (b->tt.entries == NULL) {
-        b->tt.entries = sys_mmap_anon_shared(TT_ENTRIES * sizeof b->tt.entries[0],
+        size_t const entries = 1<<26;
+        size_t const mask = entries-1;
+        b->tt.entries = sys_mmap_anon_shared(entries * sizeof b->tt.entries[0],
                                              SYS_PROT_READ | SYS_PROT_WRITE,
                                              SYS_MADV_RANDOM);
+        b->tt.mask = mask;
         if (b->tt.entries == NULL) {
             __builtin_trap();
         }
@@ -232,13 +238,23 @@ enum move_result {
     MR_CHECKMATE,
 };
 
+struct move_undo {
+    Piece8 captured_piece;
+    Piece8 moved_piece;
+    Sq8 captured_square;
+    Sq8 moved_square;
+};
+
 /* does not check validity */
 static enum move_result move_piece(struct pos* restrict     pos,
+                                   Side8                    us,
                                    struct history* restrict hist,
                                    Piece8                   mailbox[restrict static SQ_COUNT],
                                    struct move              move)
 {
-    Side8 const us   = pos->moving_side;
+    struct move_undo undo;
+
+    //Side8 const us   = pos->moving_side;
     Side8 const them = other_side(us);
 
     Piece8 const from_piece = mailbox[move.from];
@@ -375,36 +391,42 @@ static enum move_result move_piece(struct pos* restrict     pos,
     pos->fullmoves += (pos->moving_side == SIDE_BLACK);
     pos->halfmoves += 1;
 
-    assuming(hist->length < 64);
-    int repetitions = 0;
-    for (size_t i = 0; i < hist->length; ++i) {
-        _Static_assert(sizeof *pos == sizeof hist->items[i]);
-        if (!my_memcmp(&hist->items[i].pieces, &pos->pieces, sizeof pos->pieces)
-         && !my_memcmp(&hist->items[i].castling_illegal, &pos->castling_illegal, sizeof pos->castling_illegal)
-         && hist->items[i].moving_side == pos->moving_side
-         && hist->items[i].ep_targets == pos->ep_targets)
-        {
-            repetitions += 1;
+    assuming(hist->length < sizeof hist->hashes / sizeof *hist->hashes);
+
+    /* check for repeated moves */
+    /* TODO: add move_do and move_undo to create proper repeat checks */
+    {
+        size_t i;
+        for (i = 0; i < hist->length / 8; ++i) {
+            uint64_t vec_a[8];
+            uint64_t vec_b[8];
+            bool match = false;
+            for (size_t vec_i = 0; vec_i < 8; ++vec_i) {
+                vec_a[i] = pos->hash;
+            }
+            for (size_t vec_i = 0; vec_i < 8; ++vec_i) {
+                vec_b[i] = hist->hashes[8*i + vec_i];
+            }
+            for (size_t vec_i = 0; vec_i < 8; ++vec_i) {
+                if (vec_a[vec_i] == vec_b[vec_i]) {
+                    match = true;
+                }
+            }
+            if (match) {
+                return MR_STALEMATE;
+            }
         }
+        for (; i < hist->length; ++i) {
+            if (hist->hashes[i] == pos->hash) {
+                return MR_STALEMATE;
+            }
+        }
+        hist->hashes[hist->length++] = pos->hash;
     }
 
-    hist->items[hist->length++] = *pos;
-
-    if (repetitions >= 3 || pos->halfmoves > 50) {
+    if (pos->halfmoves > 50) {
         return MR_STALEMATE;
     }
-    else if (repetitions > 0) {
-        return MR_REPEATS;
-    }
-    else if (pos->halfmoves > 50) {
-        return MR_STALEMATE;
-    }
-#if 0
-    else if (attacks_to(pos, pos->pieces[them][PIECE_KING], 0ULL, 0ULL)
-            & ~pos->occupied[them]) {
-        return MR_CHECK;
-    }
-#endif
     else {
         return MR_NORMAL;
     }
@@ -417,7 +439,25 @@ static enum move_result move_piece(struct pos* restrict     pos,
 static enum move_result board_move(struct board* b, struct move move)
 {
     return move_piece(&b->pos,
+                      b->pos.moving_side,
                       &b->hist,
                       b->mailbox,
                       move);
+}
+
+static bool pos_is_legal(struct pos const* restrict pos)
+{
+    Side8 const mside = pos->moving_side;
+    Side8 const oside = other_side(mside);
+
+    if (pos->pieces[oside][PIECE_KING] & all_threats_from_side(pos, mside)) {
+        return false;
+    }
+
+    return true;
+}
+
+static bool board_is_legal(struct board* b)
+{
+    return pos_is_legal(&b->pos);
 }

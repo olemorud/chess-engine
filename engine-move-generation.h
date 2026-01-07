@@ -178,7 +178,6 @@ static void all_pseudolegal_moves(struct pos const* restrict pos,
     Bb64 const their_threats = all_threats_from_side(pos, them);
 
     Bb64 const their_occ = pos->occupied[them];
-    Bb64 const all_occ   = pos->occupied[SIDE_WHITE] | pos->occupied[SIDE_BLACK];
 
     Bb64 allowed;
     if (type == MG_CAPTURES) {

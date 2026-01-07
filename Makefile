@@ -4,13 +4,14 @@ CC := clang
 
 CFLAGS.gcc := -std=c23 -Wall -Wextra -Wconversion -Wno-unused-function
 CFLAGS.gcc.release := -Ofast -march=native -DNDEBUG
-CFLAGS.gcc.debug := -ggdb -O0 -fsanitize=address
+CFLAGS.gcc.debug := -ggdb -O1 -fsanitize=address
 
 CFLAGS.clang := -std=c23 -g -Wall -Wextra -Wconversion -Wno-unused-function -Wimplicit-int-conversion
-CFLAGS.clang.release := -O3 -ffast-math -march=native # -DNDEBUG
-CFLAGS.clang.debug := -g3 -O0 -fsanitize=address
+CFLAGS.clang.release := -O3 -ffast-math -march=native -DNDEBUG -DNSTATS
+CFLAGS.clang.debug := -g3 -O1 -fsanitize=address,undefined
 CFLAGS.clang.wasm := \
 	--target=wasm32-unknown-unknown -nostdlib -g \
+	-DNSTATS \
 	-Wl,--export-all \
 	-Wl,--no-entry
 
@@ -33,4 +34,4 @@ mbb_bishop.h: codegen
 	./codegen
 
 tests: tests.c mbb_rook.h mbb_bishop.h engine.h
-	$(CC) -o $@ $(CFLAGS) -DUSE_PRINTF tests.c
+	$(CC) -o $@ $(CFLAGS) tests.c

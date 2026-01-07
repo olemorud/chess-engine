@@ -38,13 +38,12 @@ static void bitboard_print(Bb64 b, FILE* out)
 
 static void tt_print_stats(struct tt* tt, FILE* out)
 {
-#ifndef NDEBUG
     double sat = 0;
     for (size_t i = 0; i < TT_ENTRIES; ++i) {
         if (tt->entries[i].init)
             sat += 1.0;
     }
-    double const pct = sat/TT_ENTRIES;
+    double const pct = sat/((double)tt->mask+1.0);
 
     fprintf(out, "---- Stats ---\n");
     fprintf(out, "tt collisions: %"PRIu64"\n", tt->collisions);
@@ -52,10 +51,6 @@ static void tt_print_stats(struct tt* tt, FILE* out)
     fprintf(out, "tt probes:     %"PRIu64"\n", tt->probes);
     fprintf(out, "tt insertions: %"PRIu64"\n", tt->insertions);
     fprintf(out, "saturation:    %.02lf\n", pct);
-#else
-    (void)tt;
-    fprintf(out, "stats not available with NDEBUG\n");
-#endif
 }
 
 static void board_print_fen(struct pos const* pos, FILE* out)

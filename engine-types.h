@@ -140,6 +140,7 @@ typedef enum sq8 : uint8_t {
     #define X(file, rank) SQ_##file##rank = SQ_FROM_RF(RANK_INDEX_##rank, FILE_INDEX_##file),
     SQUARES_LIST
     SQ_COUNT,
+    SQ_POISONED,
     #undef X
     /* define iterator begin enum */
     #define X(file, rank) SQ_BEGIN = SQ_##file##rank,
@@ -192,24 +193,26 @@ static char const* side_str[SIDE_COUNT] = {
 /* ----------- Piece8 ----------- */
 
 /* https://en.wikipedia.org/wiki/X_macro */
-/*    enum          value   white char   white unicode   black char    black unicode  */
+/*    enum           value   white char   white unicode   black char    black unicode  */
 #define PIECES \
-    X(PIECE_PAWN,     1.0,         'P',         0x2659,         'p',          0x265F) \
-    X(PIECE_KING,     0.0,         'K',         0x2654,         'k',          0x265A) \
-    X(PIECE_QUEEN,    9.0,         'Q',         0x2655,         'q',          0x265B) \
-    X(PIECE_BISHOP,   3.0,         'B',         0x2657,         'b',          0x265D) \
-    X(PIECE_ROOK,     5.0,         'R',         0x2656,         'r',          0x265C) \
-    X(PIECE_KNIGHT,   3.0,         'N',         0x2658,         'n',          0x265E)
+    X(PIECE_PAWN,     1.0f,         'P',         0x2659,         'p',          0x265F) \
+    X(PIECE_KNIGHT,   3.1f,         'N',         0x2658,         'n',          0x265E) \
+    X(PIECE_BISHOP,   3.2f,         'B',         0x2657,         'b',          0x265D) \
+    X(PIECE_ROOK,     5.0f,         'R',         0x2656,         'r',          0x265C) \
+    X(PIECE_QUEEN,    9.0f,         'Q',         0x2655,         'q',          0x265B) \
+    X(PIECE_KING,    16.0f,         'K',         0x2654,         'k',          0x265A) \
+    /**/
 
 typedef enum piece : uint8_t {
 #define X(e, v, wc, wu, bc, bu) e,
     PIECES
     PIECE_COUNT,
     PIECE_BEGIN = 0,
+    PIECE_POISONED, /* used as default undefined value in debug builds */
 #undef X
 } Piece8;
 
-static double piece_value[PIECE_COUNT] = {
+static float piece_value[PIECE_COUNT] = {
 #define X(e, v, wc, wu, bc, bu) [e] = v,
     PIECES
 #undef X
@@ -260,6 +263,7 @@ static int const piece_unicode[SIDE_COUNT][PIECE_COUNT] = {
 
 enum {
     MATTR_PROMOTE = 1<<0,
+    MATTR_POISONED = 1<<1,
 };
 
 struct move {
@@ -272,9 +276,11 @@ struct move {
 _Static_assert(sizeof(struct move) == 4,
         "this static assuming is here to check when sizeof(move) changes");
 
-#define NULL_MOVE (struct move){0}
+#define MOVE_NULL (struct move){0}
 
-#define IS_NULL_MOVE(m) ((m).from == (m).to)
+#define MOVE_POISONED (struct move) {.from = SQ_POISONED, .to = SQ_POISONED, .attr = MATTR_POISONED }
+
+#define IS_MOVE_NULL(m) ((m).from == (m).to)
 
 /* ----------- castle_direction ----------- */
 enum castle_direction {
@@ -283,3 +289,32 @@ enum castle_direction {
     CASTLE_QUEENSIDE,
     CASTLE_COUNT,
 };
+
+
+/* -------------- stop flag --------------- */
+
+/* occupy an entire cache line to avoid invalidation from neighboring writes */
+struct searching_flag {
+    alignas(CACHE_LINE_SIZE) atomic_uint_fast8_t v;
+    uint8_t pad[CACHE_LINE_SIZE - sizeof(atomic_uint_fast8_t)];
+};
+
+static inline void searching_init(struct searching_flag* restrict sf)
+{
+    atomic_init(&sf->v, 0);
+}
+
+static inline bool searching_still(struct searching_flag const* restrict sf)
+{
+    return atomic_load_explicit(&sf->v, memory_order_relaxed);
+}
+
+static inline void searching_start(struct searching_flag* restrict sf)
+{
+    atomic_store_explicit(&sf->v, 1, memory_order_relaxed);
+}
+
+static inline void searching_stop(struct searching_flag* restrict sf)
+{
+    atomic_store_explicit(&sf->v, 0, memory_order_relaxed);
+}

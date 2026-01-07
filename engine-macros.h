@@ -11,3 +11,8 @@
 #else
 #define assuming(expr) ((expr) ? 0 : (__builtin_unreachable(), 0))
 #endif
+
+#define CACHE_LINE_SIZE 64
+
+#define LIKELY(expr)   __builtin_expect((expr), 1)
+#define UNLIKELY(expr) __builtin_expect((expr), 0)
