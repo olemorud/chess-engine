@@ -22,7 +22,7 @@ struct board {
 
     /* used for repeated board state detection only */
     struct history {
-        uint64_t hashes[50]; /* array of zobrist hashes */
+        struct pos items[50];
         size_t length;
     } hist;
 
@@ -380,37 +380,22 @@ static enum move_result move_piece(struct pos* restrict     pos,
     pos->fullmoves += (pos->moving_side == SIDE_BLACK);
     pos->halfmoves += 1;
 
-    assuming(hist->length < sizeof hist->hashes / sizeof *hist->hashes);
+    assuming(hist->length < sizeof hist->items / sizeof *hist->items);
 
     /* check for repeated moves */
     /* TODO: add move_do and move_undo to create proper repeat checks */
-    {
-        size_t i;
-        for (i = 0; i < hist->length / 8; ++i) {
-            uint64_t vec_a[8];
-            uint64_t vec_b[8];
-            bool match = false;
-            for (size_t vec_i = 0; vec_i < 8; ++vec_i) {
-                vec_a[i] = pos->hash;
-            }
-            for (size_t vec_i = 0; vec_i < 8; ++vec_i) {
-                vec_b[i] = hist->hashes[8*i + vec_i];
-            }
-            for (size_t vec_i = 0; vec_i < 8; ++vec_i) {
-                if (vec_a[vec_i] == vec_b[vec_i]) {
-                    match = true;
-                }
-            }
-            if (match) {
-                return MR_STALEMATE;
-            }
+    assuming(hist->length < 64);
+
+    for (size_t i = 0; i < hist->length; ++i) {
+        _Static_assert(sizeof *pos == sizeof hist->items[i]);
+
+        if (!my_memcmp(&hist->items[i].pieces, &pos->pieces, sizeof pos->pieces)
+         && !my_memcmp(&hist->items[i].castling_illegal, &pos->castling_illegal, sizeof pos->castling_illegal)
+         && hist->items[i].moving_side == pos->moving_side
+         && hist->items[i].ep_targets == pos->ep_targets)
+        {
+            return MR_STALEMATE;
         }
-        for (; i < hist->length; ++i) {
-            if (hist->hashes[i] == pos->hash) {
-                return MR_STALEMATE;
-            }
-        }
-        hist->hashes[hist->length++] = pos->hash;
     }
 
     if (pos->halfmoves > 50) {
