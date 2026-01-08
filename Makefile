@@ -6,7 +6,7 @@ CFLAGS.gcc := -std=c23 -Wall -Wextra -Wconversion -Wno-unused-function
 CFLAGS.gcc.release := -Ofast -march=native -DNDEBUG
 CFLAGS.gcc.debug := -ggdb -O1 -fsanitize=address
 
-CFLAGS.clang := -std=c23 -g -Wall -Wextra -Wconversion -Wno-unused-function -Wimplicit-int-conversion -Wno-macro-redefined
+CFLAGS.clang := -std=c23 -g -Wall -Wextra -Wconversion -Wno-unused-function -Wimplicit-int-conversion -Wno-macro-redefined -Wno-initializer-overrides
 CFLAGS.clang.release := -O3 -ffast-math -march=native -DNDEBUG -DNSTATS
 CFLAGS.clang.debug := -g3 -O1 -fsanitize=address,undefined
 CFLAGS.clang.wasm := \
