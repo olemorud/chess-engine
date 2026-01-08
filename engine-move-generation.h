@@ -1,5 +1,7 @@
 #pragma once
 
+#define MOVE_MAX 128
+
 #define MOVE_CASTLE_KINGSIDE_WHITE (struct move) \
     {.from = SQ_E1, .to = SQ_G1}
 
@@ -13,19 +15,10 @@
     {.from = SQ_E8, .to = SQ_C8}
 
 static inline
-struct move move_make(struct pos const* restrict pos,
-                      Piece8 piece,
-                      Index8 from,
-                      Index8 to,
-                      uint8_t add_attr)
+struct move move_make(Index8 from, Index8 to)
 {
-    (void)piece;
-    (void)pos;
-    (void)add_attr;
-
-    return (struct move){.from = from, .to = to, .attr = add_attr};
+    return (struct move){.from = from, .to = to};
 }
-#define MOVE_MAX 128
 
 enum move_gen_type {
     MG_ALL,
@@ -64,7 +57,7 @@ static void all_pseudolegal_from_piece(struct pos const* restrict pos,
         while (move_mask) {
             Sq8 const to = bitboard_pop_lsb(&move_mask);
             assuming(*out_count < MOVE_MAX); \
-            out[(*out_count)++] = move_make(pos, piece, from, to, 0);
+            out[(*out_count)++] = move_make(from, to);
         }
     }
 }
@@ -88,7 +81,7 @@ static void all_pseudolegal_pawn_moves_##side(struct pos const* restrict pos,\
     while (sp) {\
         Sq8 const to = bitboard_pop_lsb(&sp);\
         Sq8 const from = SQ_SHIFT_##inverse_direction(to, 1);\
-        out[(*out_count)++] = move_make(pos, PIECE_PAWN, from, to, 0);\
+        out[(*out_count)++] = move_make(from, to);\
     }\
 \
     Bb64 dp = pawn_double_push_##side(piece_mask & pawn_rank, ~all_occ)\
@@ -97,7 +90,7 @@ static void all_pseudolegal_pawn_moves_##side(struct pos const* restrict pos,\
     while (dp) {\
         Sq8 const to = bitboard_pop_lsb(&dp);\
         Sq8 const from = SQ_SHIFT_##inverse_direction(to, 2);\
-        out[(*out_count)++] = move_make(pos, PIECE_PAWN, from, to, 0);\
+        out[(*out_count)++] = move_make(from, to);\
     }\
 }
 DEFINE_ALL_PSEUDOLEGAL_PAWN_MOVES(white, black, SIDE_WHITE, SOUTH, RANK_MASK_2)
@@ -125,7 +118,7 @@ static void all_pseudolegal_pawn_attacks_##side(struct pos const* restrict pos,\
         Sq8 const to = bitboard_pop_lsb(&ratk);\
         Sq8 const from = SQ_SHIFT_WEST(SQ_SHIFT_##inverse_direction(to, 1), 1);\
         assuming(*out_count < MOVE_MAX); \
-        out[(*out_count)++] = move_make(pos, PIECE_PAWN, from, to, 0);\
+        out[(*out_count)++] = move_make(from, to);\
     }\
 \
     Bb64 latk = pawn_attacks_left_##side(piece_mask)\
@@ -136,7 +129,7 @@ static void all_pseudolegal_pawn_attacks_##side(struct pos const* restrict pos,\
         Sq8 const to = bitboard_pop_lsb(&latk);\
         Sq8 const from = SQ_SHIFT_EAST(SQ_SHIFT_##inverse_direction(to, 1), 1);\
         assuming(*out_count < MOVE_MAX); \
-        out[(*out_count)++] = move_make(pos, PIECE_PAWN, from, to, 0);\
+        out[(*out_count)++] = move_make(from, to);\
     }\
 }
 DEFINE_ALL_PSEUDOLEGAL_PAWN_ATTACKS(white, black, SIDE_WHITE, SOUTH)

@@ -470,12 +470,12 @@ int main()
         struct search_result sr = search(b, b->pos.moving_side, 25, &searching);
 
         struct move move = sr.move;
-        double const score = sr.score;
+        Score16 const score = sr.score;
 
         printf("move %d: {\n"
                "    .from = %s, (%s)\n"
                "    .to = %s,\n"
-               "    .score = %lf,\n"
+               "    .score = %d,\n"
                "    .mask = "
                "",
                turn,

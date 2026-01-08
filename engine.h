@@ -11,6 +11,8 @@
 
 /* temp performance counter */
 static uint64_t g_ab_node_volume = 0;
+static uint64_t g_pvs_re_search = 0;
+static uint64_t g_pvs_probes = 0;
 
 #include "engine-macros.h"
 #include "engine-types.h"
@@ -22,9 +24,6 @@ static uint64_t g_ab_node_volume = 0;
 #include "engine-evaluations.h"
 
 /* --------------------------- MOVE SEARCH --------------------------------- */
-
-#define SCORE_INF       1e10f
-#define SCORE_CHECKMATE 999.0f
 
 /* for initial ordering of moves in alphabeta search */
 static void move_compute_appeal(struct move* restrict      m,
@@ -43,91 +42,84 @@ static void move_compute_appeal(struct move* restrict      m,
 
     /* TODO: remove branch */
     if (n) {
-        m->appeal = (uint8_t)(16.0f*(float)n - piece_value[atk]);
+        m->appeal = (uint8_t)(16*n - piece_value[atk]);
     } else {
         m->appeal = 0;
     }
 }
 
-static float board_score_heuristic(struct pos const* pos)
+static Score16 board_score_heuristic(struct pos const* pos)
 {
     /* this function always evaluates from white's perspective before
        eventually flipping the sign based on `pos` */
-    float score = 0.0f;
+    Score16 score = 0;
 
     Bb64 const occw = ~pos->pieces[SIDE_WHITE][PIECE_EMPTY];
     Bb64 const occb = ~pos->pieces[SIDE_BLACK][PIECE_EMPTY];
 
     enum game_progress const gp = endgameness(pos);
 
-    if (pos->pieces[SIDE_WHITE][PIECE_KING] == 0) {
-        score -= SCORE_CHECKMATE;
-        goto end;
-    }
-    if (pos->pieces[SIDE_BLACK][PIECE_KING] == 0) {
+    if (pos->pieces[SIDE_WHITE][PIECE_KING]) {
         score += SCORE_CHECKMATE;
-        goto end;
+    }
+    if (pos->pieces[SIDE_BLACK][PIECE_KING]) {
+        score -= SCORE_CHECKMATE;
     }
 
     for (Piece8 p = PIECE_BEGIN; p < PIECE_COUNT; ++p) {
         /* raw material value */
         score += piece_value[p] *
-            ((float)bitboard_popcount(pos->pieces[SIDE_WHITE][p]) -
-             (float)bitboard_popcount(pos->pieces[SIDE_BLACK][p]));
-
-        /* very minor advantage for threat projection to break tied moves */
-        //if (p != PIECE_PAWN) {
-        //    score += 0.001f * (
-        //        (float)bitboard_popcount(non_pawn_piece_attacks(p, pos->pieces[SIDE_WHITE][p], occall))
-        //      - (float)bitboard_popcount(non_pawn_piece_attacks(p, pos->pieces[SIDE_BLACK][p], occall)));
-        //}
+            ((Score16)bitboard_popcount(pos->pieces[SIDE_WHITE][p]) -
+             (Score16)bitboard_popcount(pos->pieces[SIDE_BLACK][p]));
 
         /* positional bonus, see evaluations.h */
         for (size_t i = 0; i < POSITIONAL_MODIFIER_COUNT; ++i) {
             score += positional_modifier(SIDE_WHITE, gp, i, p).val *
                 (
-                 (float)bitboard_popcount(
+                 (Score16)bitboard_popcount(
                     pos->pieces[SIDE_WHITE][p]
                   & positional_modifier(SIDE_WHITE, gp, i, p).area)
-               - (float)bitboard_popcount(
+               - (Score16)bitboard_popcount(
                      pos->pieces[SIDE_BLACK][p]
                   & positional_modifier(SIDE_BLACK, gp, i, p).area)
                );
         }
     }
 
-    score += 0.10f * (float)bitboard_more_than_one(pos->pieces[SIDE_WHITE][PIECE_BISHOP]);
-    score -= 0.10f * (float)bitboard_more_than_one(pos->pieces[SIDE_BLACK][PIECE_BISHOP]);
+    /* bishop pair */
+    score += 10 * (Score16)bitboard_more_than_one(pos->pieces[SIDE_WHITE][PIECE_BISHOP]);
+    score -= 10 * (Score16)bitboard_more_than_one(pos->pieces[SIDE_BLACK][PIECE_BISHOP]);
 
     /* pawns defending pieces are desired */
-    score += 0.03f * (
-        (float)bitboard_popcount(
+    score += 3 * (
+        (Score16)bitboard_popcount(
             pawn_attacks_white(pos->pieces[SIDE_WHITE][PIECE_PAWN]) & occw
         )
-        - (float)bitboard_popcount(
+        - (Score16)bitboard_popcount(
             pawn_attacks_black(pos->pieces[SIDE_BLACK][PIECE_PAWN]) & occb
         )
     );
 
     /* stacked pawns are bad */
-    const float k = 0.30f;
+    /*
+    const Score16 k = 30;
     for (enum file_index fi = FILE_INDEX_BEGIN; fi < FILE_INDEX_COUNT; ++fi) {
         uint64_t wstk = bitboard_popcount(pos->pieces[SIDE_WHITE][PIECE_PAWN] & FILE_MASK(fi));
         uint64_t bstk = bitboard_popcount(pos->pieces[SIDE_BLACK][PIECE_PAWN] & FILE_MASK(fi));
 
-        score -= k * (float)(wstk - (wstk == 1));
-        score += k * (float)(bstk - (bstk == 1));
+        score -= k * (Score16)(wstk - (wstk == 1));
+        score += k * (Score16)(bstk - (bstk == 1));
     }
+    */
 
-end:
-    float sign = (pos->moving_side == SIDE_WHITE) ? 1.0f : -1.0f;
+    Score16 sign = (pos->moving_side == SIDE_WHITE) ? 1 : -1;
 
     return sign*score;
 }
 
 static
 struct move moves_linear_search(struct move      moves[restrict static MOVE_MAX],
-                                              size_t* restrict move_count)
+                                size_t* restrict move_count)
 {
     size_t best = 0;
     assuming(*move_count > 0);
@@ -146,21 +138,21 @@ struct move moves_linear_search(struct move      moves[restrict static MOVE_MAX]
 
 /* quiescence is a deep search that only considers captures */
 static
-float quiesce(struct pos const*  pos,
-               Piece8            mailbox[restrict static SQ_COUNT],
-               Side8             us,
-               float             alpha,
-               float             beta,
-               int8_t            depth)
+Score16 quiesce(struct pos const*  pos,
+                Piece8             mailbox[restrict static SQ_COUNT],
+                Side8              us,
+                Score16            alpha,
+                Score16            beta,
+                int8_t             depth)
 {
     if (pos->pieces[us][PIECE_KING] == 0) {
-        return -(SCORE_CHECKMATE + (float)depth);
+        return -(SCORE_CHECKMATE + depth);
     }
 
     Side8 const them = other_side(us);
 
-    float score = board_score_heuristic(pos);
-    float highscore = score;
+    Score16 score = board_score_heuristic(pos);
+    Score16 highscore = score;
 
     if (highscore >= beta) {
         return highscore;
@@ -196,7 +188,7 @@ float quiesce(struct pos const*  pos,
         hist.length = 0;
         (void)move_piece(&poscpy, us, &hist, mailbox_cpy, m);
 
-        score = -quiesce(&poscpy, mailbox_cpy, them, -beta, -alpha, depth - 1);
+        score = (Score16)-quiesce(&poscpy, mailbox_cpy, them, (Score16)(-beta), (Score16)(-alpha), depth - 1);
 
         if (score >= beta) {
             highscore = score;
@@ -222,8 +214,8 @@ struct search_option alphabeta_search(struct pos const* pos,
                                       Piece8            mailbox[restrict static SQ_COUNT],
                                       Side8             us,
                                       int8_t            depth,
-                                      float             alpha,
-                                      float             beta
+                                      Score16           alpha,
+                                      Score16           beta
                                      #ifdef FEATURE_STOPPABLE_SEARCH
                                       ,
                                       struct searching_flag const* restrict  searching
@@ -241,7 +233,7 @@ struct search_option alphabeta_search(struct pos const* pos,
 
     if (pos->pieces[us][PIECE_KING] == 0) {
         return (struct search_option) {
-            .score = -(SCORE_CHECKMATE + (float)depth),
+            .score = -(SCORE_CHECKMATE + depth),
             .move = (struct move){0},
             .depth = 0,
             .hash = pos->hash,
@@ -251,7 +243,7 @@ struct search_option alphabeta_search(struct pos const* pos,
     }
 
     if (depth <= 0) {
-        float sc = quiesce(pos, mailbox, us, alpha, beta, 0);
+        Score16 sc = quiesce(pos, mailbox, us, alpha, beta, 0);
         return (struct search_option){
             .score = sc,
             .move  = (struct move){0},
@@ -262,12 +254,12 @@ struct search_option alphabeta_search(struct pos const* pos,
         };
     }
 
-    float const alpha_orig = alpha;
+    Score16 const alpha_orig = alpha;
 
     struct move moves[MOVE_MAX];
     size_t move_count = 0;
 
-    float best_score = -SCORE_INF;
+    Score16 best_score = -SCORE_INF;
     struct move best_move = MOVE_NULL;
     bool has_principal_move = false;
 
@@ -295,6 +287,8 @@ struct search_option alphabeta_search(struct pos const* pos,
         has_principal_move = true;
     }
 
+    bool first = true;
+
     enum move_gen_type const types[] = {MG_CAPTURES, MG_CHECKS, MG_QUIETS};
     for (size_t i = 0; i < sizeof types / sizeof *types; ++i) {
         all_pseudolegal_moves(pos, types[i], us, &move_count, moves);
@@ -318,30 +312,77 @@ struct search_option alphabeta_search(struct pos const* pos,
 
             enum move_result r = move_piece(&pos_cpy, us, hist, mailbox_cpy, m);
 
-            float score = 0.0;
+            Score16 score;
 
             if (r == MR_STALEMATE || r == MR_REPEATS) {
-                score = 0.0;
+                score = 0;
             } else {
-                struct search_option so = alphabeta_search(&pos_cpy,
-                                              hist,
-                                              tt,
-                                              mailbox_cpy,
-                                              other_side(us),
-                                              depth - 1,
-                                              -beta,
-                                              -alpha
-                                            #ifdef FEATURE_STOPPABLE_SEARCH
-                                              ,
-                                              searching
-                                            #endif
-                                              );
-                if (!so.init) {
-                    hist->length = old_hist_len;
-                    return so;
+                if (first) {
+                    struct search_option so = alphabeta_search(&pos_cpy,
+                                                  hist,
+                                                  tt,
+                                                  mailbox_cpy,
+                                                  other_side(us),
+                                                  depth - 1,
+                                                  (Score16)(-beta),
+                                                  (Score16)(-alpha)
+                                                 #ifdef FEATURE_STOPPABLE_SEARCH
+                                                  ,
+                                                  searching
+                                                 #endif
+                                                  );
+                    if (!so.init) {
+                        hist->length = old_hist_len;
+                        return so;
+                    }
+                    score = (Score16)-so.score;
+                    first = false;
+                } else {
+                    struct search_option so;
+                    assuming(alpha < beta);
+                    g_pvs_probes += 1;
+                    so = alphabeta_search(&pos_cpy,
+                                          hist,
+                                          tt,
+                                          mailbox_cpy,
+                                          other_side(us),
+                                          depth - 1,
+                                          (Score16)(-alpha - 1),
+                                          (Score16)(-alpha)
+                                         #ifdef FEATURE_STOPPABLE_SEARCH
+                                          ,
+                                          searching
+                                         #endif
+                    );
+                    if (!so.init) {
+                        hist->length = old_hist_len;
+                        return so;
+                    }
+                    if ((Score16)-so.score > alpha) {
+                        g_pvs_re_search += 1;
+
+                        so = alphabeta_search(&pos_cpy,
+                                 hist,
+                                 tt,
+                                 mailbox_cpy,
+                                 other_side(us),
+                                 depth - 1,
+                                 (Score16)(-beta),
+                                 (Score16)(-alpha)
+                                #ifdef FEATURE_STOPPABLE_SEARCH
+                                 ,
+                                 searching
+                                #endif
+                        );
+                        if (!so.init) {
+                            hist->length = old_hist_len;
+                            return so;
+                        }
+                    }
+                    score = (Score16)-so.score;
                 }
-                score = -so.score;
             }
+
             hist->length = old_hist_len;
 
             if (score > best_score) {
@@ -360,7 +401,7 @@ struct search_option alphabeta_search(struct pos const* pos,
 finish_search:
 
     if (IS_MOVE_NULL(best_move)) {
-        return (struct search_option){ .init = true, .move = MOVE_NULL, .score = -(SCORE_CHECKMATE + (float)depth) };
+        return (struct search_option){ .init = true, .move = MOVE_NULL, .score = -(SCORE_CHECKMATE + depth) };
     }
 
     enum tt_flag flag = TT_EXACT;
@@ -387,8 +428,8 @@ finish_search:
 }
 
 static
-struct search_result {struct move move; float score;}
-  search(
+struct search_result {struct move move; Score16 score;}
+search(
           struct board* restrict b, 
           Side8 us,
           int8_t max_depth
@@ -401,12 +442,6 @@ struct search_result {struct move move; float score;}
     struct move moves[MOVE_MAX];
     size_t move_count = 0;
 
-#ifndef NDEBUG
-    for (size_t i = 0; i < MOVE_MAX; ++i) {
-        moves[i] = MOVE_POISONED;
-    }
-#endif
-
     all_pseudolegal_moves(&b->pos, MG_ALL, us, &move_count, moves);
 
     assuming(move_count);
@@ -414,8 +449,10 @@ struct search_result {struct move move; float score;}
     struct move best_move = moves[0];
 
     g_ab_node_volume = 0;
+    g_pvs_re_search = 0;
+    g_pvs_probes = 0;
 
-    float score = 0.0;
+    Score16 score = 0;
 
     for (int8_t d = 1;
          d <= max_depth
@@ -425,11 +462,27 @@ struct search_result {struct move move; float score;}
          ;
          ++d)
     {
-        float window = 2*SCORE_INF; /* temp debug solution */
-        float alpha = score - window;
-        float beta = score + window;
+        Score16 window;
+
+        if (d == 1) {
+            window = SCORE_INF;
+        } else {
+            window = 20 + 8*d;
+        }
+#ifdef FEATURE_USE_PRINTF
+        fprintf(stderr, "depth: %hhd - window %hd\n", d, window);
+#endif
 
         while (1) {
+            int al = (int)score - (int)window;
+            int bt = (int)score + (int)window;
+
+            if (al < -SCORE_INF) al = -SCORE_INF;
+            if (bt >  SCORE_INF) bt =  SCORE_INF;
+
+            Score16 alpha = (Score16)al;
+            Score16 beta = (Score16)bt;
+
             struct search_option so =
                 alphabeta_search(&b->pos, &b->hist, &b->tt, b->mailbox, us, d, alpha, beta
 #ifdef FEATURE_STOPPABLE_SEARCH
@@ -438,42 +491,34 @@ struct search_result {struct move move; float score;}
                         );
 
 #ifdef FEATURE_STOPPABLE_SEARCH
-            if (!searching_still(searching)) {
-                goto breakbreak;
-            }
+            if (!searching_still(searching)) goto stop_search;
 #endif
 
-            if (IS_MOVE_NULL(so.move)) {
-                goto breakbreak;
-            }
+            if (IS_MOVE_NULL(so.move)) goto stop_search;
 
-            if (so.score > alpha && so.score < beta) {
+            if (so.score >= alpha && so.score <= beta) {
                 score = so.score;
                 best_move = so.move;
                 break;
             }
 
-            window *= 2;
-
-            if (so.score <= alpha) {
-                alpha = -SCORE_INF;
-                beta = score + window;
-            } else {
-                alpha = score - window;
-                beta = SCORE_INF;
-            }
-
-        }
+            if (window < SCORE_INF/2) {
 #ifdef FEATURE_USE_PRINTF
-        fprintf(stderr, "depth: %hhd\n", d);
+                fprintf(stderr, "depth: %hhd - expanding window to %hd\n", d, window);
 #endif
+                window *= 2;
+            } else {
+                window = SCORE_INF;
+            }
+        }
     }
-breakbreak:
 
-#undef SCORE_INF
+stop_search:
 
 #ifdef FEATURE_USE_PRINTF
-    fprintf(stderr, "nodes searched: %'llu\n", g_ab_node_volume);
+    fprintf(stderr, "nodes searched:  %'llu\n", g_ab_node_volume);
+    fprintf(stderr, "pvs re-searches: %'llu\n", g_pvs_re_search);
+    fprintf(stderr, "pvs probes:      %'llu\n", g_pvs_probes);
 #endif
 
     return (struct search_result){.move = best_move, .score = score};

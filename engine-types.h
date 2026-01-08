@@ -1,5 +1,14 @@
 #pragma once
 
+/* --- Score16 (centipawns) ---- */
+
+typedef int16_t Score16;
+
+enum {
+    SCORE_INF       = 9999,
+    SCORE_CHECKMATE = 999,
+};
+
 /* ----------- Index8 ----------- */
 typedef uint8_t Index8;
 
@@ -195,13 +204,13 @@ static char const* side_str[SIDE_COUNT] = {
 /* https://en.wikipedia.org/wiki/X_macro */
 /*    enum           value   white char   white unicode   black char    black unicode  */
 #define PIECES \
-    X(PIECE_EMPTY,    0.0f,         ' ',            ' ',         ' ',             ' ') \
-    X(PIECE_PAWN,     1.0f,         'P',         0x2659,         'p',          0x265F) \
-    X(PIECE_KNIGHT,   3.1f,         'N',         0x2658,         'n',          0x265E) \
-    X(PIECE_BISHOP,   3.2f,         'B',         0x2657,         'b',          0x265D) \
-    X(PIECE_ROOK,     5.0f,         'R',         0x2656,         'r',          0x265C) \
-    X(PIECE_QUEEN,    9.0f,         'Q',         0x2655,         'q',          0x265B) \
-    X(PIECE_KING,    16.0f,         'K',         0x2654,         'k',          0x265A) \
+    X(PIECE_EMPTY,      0,         ' ',            ' ',         ' ',             ' ') \
+    X(PIECE_PAWN,     100,         'P',         0x2659,         'p',          0x265F) \
+    X(PIECE_KNIGHT,   301,         'N',         0x2658,         'n',          0x265E) \
+    X(PIECE_BISHOP,   302,         'B',         0x2657,         'b',          0x265D) \
+    X(PIECE_ROOK,     500,         'R',         0x2656,         'r',          0x265C) \
+    X(PIECE_QUEEN,    900,         'Q',         0x2655,         'q',          0x265B) \
+    X(PIECE_KING,    1600,         'K',         0x2654,         'k',          0x265A) \
     /**/
 
 typedef enum piece : uint8_t {
@@ -213,7 +222,7 @@ typedef enum piece : uint8_t {
 #undef X
 } Piece8;
 
-static float piece_value[PIECE_COUNT] = {
+static Score16 piece_value[PIECE_COUNT] = {
 #define X(e, v, wc, wu, bc, bu) [e] = v,
     PIECES
 #undef X
@@ -258,7 +267,6 @@ static int const piece_unicode[SIDE_COUNT][PIECE_COUNT] = {
 #undef X
     }
 };
-
 
 /* ----------- moves ----------- */
 

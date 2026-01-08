@@ -1,12 +1,14 @@
 #pragma once
 
+#include "engine-types.h"
+
 struct search_option {
-    uint64_t    hash;      // + 64 (64  / 8)
-    float       score;     // + 32 (96  / 12)
-    struct move move;      // + 32 (128 / 16)
-    int         depth : 4; // + 4  (132 / 17)
-    int         init  : 1; // + 1  (133 / 17)
-    enum tt_flag {TT_EXACT, TT_LOWER, TT_UPPER} flag : 3; // +3 (136 / 17)
+    uint64_t    hash;
+    Score16     score;
+    struct move move;
+    int         depth : 4;
+    int         init  : 1;
+    enum tt_flag {TT_EXACT, TT_LOWER, TT_UPPER} flag : 3;
 };
 
 #define TT_ADDRESS_BITS 24
